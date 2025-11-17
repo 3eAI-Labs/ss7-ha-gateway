@@ -1,0 +1,62 @@
+# SS7 HA Gateway Configuration Example
+# Copy this file to ss7-ha-gateway.properties and customize
+
+#
+# Redis Configuration
+#
+redis.cluster.nodes=localhost:7000,localhost:7001,localhost:7002,localhost:7003,localhost:7004,localhost:7005
+redis.dialog.ttl=3600
+redis.persist.dialogs=true
+
+#
+# Kafka Configuration
+#
+kafka.bootstrap.servers=localhost:9092,localhost:9093,localhost:9094
+kafka.client.id=ss7-ha-gateway-node-1
+kafka.topic.prefix=ss7.
+kafka.publish.enabled=true
+
+#
+# M3UA Configuration
+#
+m3ua.name=M3UA-STACK
+m3ua.sctp.server.host=0.0.0.0
+m3ua.sctp.server.port=2905
+m3ua.sctp.client.host=127.0.0.1
+m3ua.sctp.client.port=2906
+
+#
+# SCCP Configuration
+#
+sccp.name=SCCP-STACK
+sccp.local.pc=1
+sccp.local.ssn=8
+sccp.local.gt=123456789
+sccp.network.indicator=NATIONAL
+
+#
+# TCAP Configuration
+#
+tcap.name=TCAP-STACK
+tcap.dialog.idle.timeout=60000
+tcap.invoke.timeout=30000
+tcap.max.dialogs=5000
+
+#
+# MAP Configuration
+#
+map.name=MAP-STACK
+map.version=MAP_V3
+
+#
+# Monitoring Configuration
+#
+monitoring.prometheus.enabled=true
+monitoring.prometheus.port=9090
+monitoring.health.check.interval=30000
+
+#
+# Logging Configuration
+#
+logging.level=INFO
+logging.file=/var/log/ss7-ha-gateway/gateway.log

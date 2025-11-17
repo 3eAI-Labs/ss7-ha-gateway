@@ -1,0 +1,260 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ss7-ha-gateway
+---
+#
+# SS7 HA Gateway Deployment
+#
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ss7-ha-gateway
+  namespace: ss7-ha-gateway
+  labels:
+    app: ss7-ha-gateway
+    component: ss7-gateway
+spec:
+  serviceName: ss7-ha-gateway
+  replicas: 3
+  selector:
+    matchLabels:
+      app: ss7-ha-gateway
+      component: ss7-gateway
+  template:
+    metadata:
+      labels:
+        app: ss7-ha-gateway
+        component: ss7-gateway
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      affinity:
+        # Prefer spreading pods across nodes
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - ss7-ha-gateway
+              topologyKey: kubernetes.io/hostname
+
+      containers:
+      - name: ss7-ha-gateway
+        image: ss7-ha-gateway:latest
+        imagePullPolicy: IfNotPresent
+
+        ports:
+        - name: m3ua
+          containerPort: 2905
+          protocol: TCP
+        - name: metrics
+          containerPort: 9090
+          protocol: TCP
+
+        env:
+        - name: NODE_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: REDIS_CLUSTER_NODES
+          value: "redis-cluster:6379"
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka-cluster-kafka-bootstrap:9092"
+        - name: KAFKA_CLIENT_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: JAVA_OPTS
+          value: "-Xms1g -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
+
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: 9090
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /metrics
+            port: 9090
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+          readOnly: true
+
+      volumes:
+      - name: config
+        configMap:
+          name: ss7-ha-gateway-config
+---
+#
+# SS7 HA Gateway Service
+#
+apiVersion: v1
+kind: Service
+metadata:
+  name: ss7-ha-gateway
+  namespace: ss7-ha-gateway
+  labels:
+    app: ss7-ha-gateway
+spec:
+  type: ClusterIP
+  clusterIP: None  # Headless service for StatefulSet
+  ports:
+  - name: m3ua
+    port: 2905
+    targetPort: 2905
+    protocol: TCP
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+    protocol: TCP
+  selector:
+    app: ss7-ha-gateway
+    component: ss7-gateway
+---
+#
+# SS7 HA Gateway ConfigMap
+#
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ss7-ha-gateway-config
+  namespace: ss7-ha-gateway
+data:
+  ss7-ha-gateway.properties: |
+    # Redis Configuration
+    redis.cluster.nodes=redis-cluster:6379
+    redis.dialog.ttl=3600
+    redis.persist.dialogs=true
+
+    # Kafka Configuration
+    kafka.bootstrap.servers=kafka-cluster-kafka-bootstrap:9092
+    kafka.topic.prefix=ss7.
+    kafka.publish.enabled=true
+
+    # M3UA Configuration
+    m3ua.name=M3UA-STACK
+    m3ua.sctp.server.host=0.0.0.0
+    m3ua.sctp.server.port=2905
+
+    # SCCP Configuration
+    sccp.name=SCCP-STACK
+    sccp.local.pc=1
+    sccp.local.ssn=8
+    sccp.local.gt=123456789
+    sccp.network.indicator=NATIONAL
+
+    # TCAP Configuration
+    tcap.name=TCAP-STACK
+    tcap.dialog.idle.timeout=60000
+    tcap.invoke.timeout=30000
+    tcap.max.dialogs=5000
+
+    # MAP Configuration
+    map.name=MAP-STACK
+    map.version=MAP_V3
+
+    # Monitoring
+    monitoring.prometheus.enabled=true
+    monitoring.prometheus.port=9090
+---
+#
+# HorizontalPodAutoscaler
+#
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ss7-ha-gateway
+  namespace: ss7-ha-gateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: ss7-ha-gateway
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 60
+---
+#
+# PodDisruptionBudget
+#
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ss7-ha-gateway
+  namespace: ss7-ha-gateway
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: ss7-ha-gateway
+      component: ss7-gateway
+---
+#
+# ServiceMonitor for Prometheus Operator
+#
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ss7-ha-gateway
+  namespace: ss7-ha-gateway
+  labels:
+    app: ss7-ha-gateway
+spec:
+  selector:
+    matchLabels:
+      app: ss7-ha-gateway
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics

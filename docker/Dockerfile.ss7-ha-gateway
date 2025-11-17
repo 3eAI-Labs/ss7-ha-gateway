@@ -1,0 +1,76 @@
+# SS7 HA Gateway Dockerfile
+#
+# Multi-stage build for optimized image size
+#
+
+#
+# Stage 1: Build
+#
+FROM maven:3.8-openjdk-8 AS build
+
+WORKDIR /app
+
+# Copy pom files first (for better caching)
+COPY pom.xml ./
+COPY ss7-core/pom.xml ./ss7-core/
+COPY ss7-kafka-bridge/pom.xml ./ss7-kafka-bridge/
+COPY ss7-ha-manager/pom.xml ./ss7-ha-manager/
+
+# Download dependencies (cached layer)
+RUN mvn dependency:go-offline -B
+
+# Copy source code
+COPY ss7-core/src ./ss7-core/src
+COPY ss7-kafka-bridge/src ./ss7-kafka-bridge/src
+COPY ss7-ha-manager/src ./ss7-ha-manager/src
+
+# Build application (skip tests for faster build)
+RUN mvn clean package -DskipTests -B
+
+#
+# Stage 2: Runtime
+#
+FROM openjdk:8-jre-alpine
+
+# Install required packages
+RUN apk add --no-cache \
+    bash \
+    curl \
+    netcat-openbsd
+
+# Create app user
+RUN addgroup -S ss7 && adduser -S ss7 -G ss7
+
+WORKDIR /app
+
+# Copy built artifacts from build stage
+COPY --from=build /app/ss7-core/target/ss7-core-*.jar ./ss7-ha-gateway.jar
+COPY --from=build /app/ss7-core/target/lib ./lib
+
+# Copy configuration
+COPY config/ss7-ha-gateway.properties.example ./config/ss7-ha-gateway.properties
+
+# Copy entrypoint script
+COPY docker/entrypoint.sh ./
+RUN chmod +x ./entrypoint.sh
+
+# Change ownership
+RUN chown -R ss7:ss7 /app
+
+# Switch to app user
+USER ss7
+
+# Expose ports
+EXPOSE 2905/tcp   # M3UA SCTP
+EXPOSE 2905/sctp  # M3UA SCTP
+EXPOSE 9090/tcp   # Prometheus metrics
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD curl -f http://localhost:9090/metrics || exit 1
+
+# Set JVM options
+ENV JAVA_OPTS="-Xms512m -Xmx2048m -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
+
+# Entrypoint
+ENTRYPOINT ["./entrypoint.sh"]

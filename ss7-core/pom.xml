@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    
+    <modelVersion>4.0.0</modelVersion>
+    
+    <parent>
+        <groupId>com.company.ss7ha</groupId>
+        <artifactId>ss7-ha-gateway-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+    
+    <artifactId>ss7-core</artifactId>
+    <name>SS7 Core</name>
+    <description>Core SS7 stack management with MAP and CAP support</description>
+    
+    <dependencies>
+        <!-- Corsac JSS7 Stack (AGPL-3.0 - Source code must be published!) -->
+        <!-- Using Mobius Software version 10.0.58 -->
+        <dependency>
+            <groupId>com.mobius-software.protocols.ss7.map</groupId>
+            <artifactId>map-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.mobius-software.protocols.ss7.map</groupId>
+            <artifactId>map-impl</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.mobius-software.protocols.ss7.cap</groupId>
+            <artifactId>cap-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.mobius-software.protocols.ss7.cap</groupId>
+            <artifactId>cap-impl</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.mobius-software.protocols.ss7.tcap</groupId>
+            <artifactId>tcap-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.mobius-software.protocols.ss7.tcap</groupId>
+            <artifactId>tcap-impl</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.mobius-software.protocols.ss7.sccp</groupId>
+            <artifactId>sccp-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.mobius-software.protocols.ss7.sccp</groupId>
+            <artifactId>sccp-impl</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.mobius-software.protocols.ss7.m3ua</groupId>
+            <artifactId>m3ua-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.mobius-software.protocols.ss7.m3ua</groupId>
+            <artifactId>m3ua-impl</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.mobius-software.protocols.ss7.mtp</groupId>
+            <artifactId>mtp-api</artifactId>
+        </dependency>
+
+        <!-- Redis Client (Apache-2.0 license - safe!) -->
+        <dependency>
+            <groupId>redis.clients</groupId>
+            <artifactId>jedis</artifactId>
+        </dependency>
+
+        <!-- JSON Serialization (Apache-2.0 license - safe!) -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+        </dependency>
+
+        <!-- Utilities -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-lang3</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+        </dependency>
+
+        <!-- Logging -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-log4j12</artifactId>
+        </dependency>
+
+        <!-- Testing -->
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

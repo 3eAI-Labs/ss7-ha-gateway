@@ -1,0 +1,75 @@
+SS7 HA Gateway
+Copyright (c) 2025 3eAI Labs
+
+This product includes software developed at 3eAI Labs
+(https://github.com/3eAI-labs).
+
+================================================================================
+
+This software is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0).
+See LICENSE file for the full license text.
+
+================================================================================
+
+This product includes the following third-party components:
+
+Corsac JSS7
+  License: GNU Affero General Public License v3.0 (AGPL-3.0)
+  Copyright: Mobius Software LTD
+  Source: https://github.com/mobius-software-ltd/corsac-jss7
+
+Apache Kafka
+  License: Apache License 2.0
+  Copyright: The Apache Software Foundation
+  Source: https://kafka.apache.org/
+
+Redis (Jedis Client)
+  License: MIT License
+  Copyright: Redis contributors
+  Source: https://github.com/redis/jedis
+
+Jackson JSON Processor
+  License: Apache License 2.0
+  Copyright: FasterXML, LLC
+  Source: https://github.com/FasterXML/jackson
+
+SLF4J
+  License: MIT License
+  Copyright: QOS.ch
+  Source: https://www.slf4j.org/
+
+Log4j
+  License: Apache License 2.0
+  Copyright: The Apache Software Foundation
+  Source: https://logging.apache.org/log4j/
+
+JUnit
+  License: Eclipse Public License 1.0
+  Copyright: JUnit team
+  Source: https://junit.org/
+
+Mockito
+  License: MIT License
+  Copyright: Mockito contributors
+  Source: https://github.com/mockito/mockito
+
+Prometheus Client
+  License: Apache License 2.0
+  Copyright: The Prometheus Authors
+  Source: https://github.com/prometheus/client_java
+
+Google Guava
+  License: Apache License 2.0
+  Copyright: Google Inc.
+  Source: https://github.com/google/guava
+
+Apache Commons Lang
+  License: Apache License 2.0
+  Copyright: The Apache Software Foundation
+  Source: https://commons.apache.org/proper/commons-lang/
+
+================================================================================
+
+For questions regarding licensing, please contact: licensing@3eai-labs.com
+
+================================================================================

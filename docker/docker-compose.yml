@@ -1,0 +1,367 @@
+version: '3.8'
+
+#
+# SS7 HA Gateway - Docker Compose
+#
+# Complete stack deployment:
+# - Redis Cluster (6 nodes: 3 masters + 3 replicas)
+# - Kafka Cluster (3 brokers)
+# - Zookeeper (for Kafka coordination)
+# - SS7 HA Gateway (3 nodes)
+# - SMSC Gateway (2 nodes)
+# - Prometheus (monitoring)
+# - Grafana (dashboards)
+#
+
+services:
+  #
+  # Redis Cluster (6 nodes)
+  #
+  redis-node-1:
+    image: redis:7-alpine
+    container_name: redis-node-1
+    command: redis-server --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --port 7000
+    ports:
+      - "7000:7000"
+    volumes:
+      - redis-node-1-data:/data
+    networks:
+      - ss7-network
+
+  redis-node-2:
+    image: redis:7-alpine
+    container_name: redis-node-2
+    command: redis-server --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --port 7001
+    ports:
+      - "7001:7001"
+    volumes:
+      - redis-node-2-data:/data
+    networks:
+      - ss7-network
+
+  redis-node-3:
+    image: redis:7-alpine
+    container_name: redis-node-3
+    command: redis-server --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --port 7002
+    ports:
+      - "7002:7002"
+    volumes:
+      - redis-node-3-data:/data
+    networks:
+      - ss7-network
+
+  redis-node-4:
+    image: redis:7-alpine
+    container_name: redis-node-4
+    command: redis-server --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --port 7003
+    ports:
+      - "7003:7003"
+    volumes:
+      - redis-node-4-data:/data
+    networks:
+      - ss7-network
+
+  redis-node-5:
+    image: redis:7-alpine
+    container_name: redis-node-5
+    command: redis-server --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --port 7004
+    ports:
+      - "7004:7004"
+    volumes:
+      - redis-node-5-data:/data
+    networks:
+      - ss7-network
+
+  redis-node-6:
+    image: redis:7-alpine
+    container_name: redis-node-6
+    command: redis-server --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --port 7005
+    ports:
+      - "7005:7005"
+    volumes:
+      - redis-node-6-data:/data
+    networks:
+      - ss7-network
+
+  # Redis Cluster Initialization
+  redis-cluster-init:
+    image: redis:7-alpine
+    container_name: redis-cluster-init
+    depends_on:
+      - redis-node-1
+      - redis-node-2
+      - redis-node-3
+      - redis-node-4
+      - redis-node-5
+      - redis-node-6
+    command: >
+      sh -c "
+        sleep 10 &&
+        redis-cli --cluster create
+        redis-node-1:7000
+        redis-node-2:7001
+        redis-node-3:7002
+        redis-node-4:7003
+        redis-node-5:7004
+        redis-node-6:7005
+        --cluster-replicas 1
+        --cluster-yes
+      "
+    networks:
+      - ss7-network
+
+  #
+  # Zookeeper (for Kafka)
+  #
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-logs:/var/lib/zookeeper/log
+    networks:
+      - ss7-network
+
+  #
+  # Kafka Cluster (3 brokers)
+  #
+  kafka-1:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka-1
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+    volumes:
+      - kafka-1-data:/var/lib/kafka/data
+    networks:
+      - ss7-network
+
+  kafka-2:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka-2
+    depends_on:
+      - zookeeper
+    ports:
+      - "9093:9093"
+    environment:
+      KAFKA_BROKER_ID: 2
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-2:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+    volumes:
+      - kafka-2-data:/var/lib/kafka/data
+    networks:
+      - ss7-network
+
+  kafka-3:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka-3
+    depends_on:
+      - zookeeper
+    ports:
+      - "9094:9094"
+    environment:
+      KAFKA_BROKER_ID: 3
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-3:9094
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+    volumes:
+      - kafka-3-data:/var/lib/kafka/data
+    networks:
+      - ss7-network
+
+  #
+  # SS7 HA Gateway (3 nodes)
+  #
+  ss7-ha-gateway-1:
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile.ss7-ha-gateway
+    container_name: ss7-ha-gateway-1
+    depends_on:
+      - redis-cluster-init
+      - kafka-1
+      - kafka-2
+      - kafka-3
+    environment:
+      NODE_ID: 1
+      REDIS_CLUSTER_NODES: redis-node-1:7000,redis-node-2:7001,redis-node-3:7002,redis-node-4:7003,redis-node-5:7004,redis-node-6:7005
+      KAFKA_BOOTSTRAP_SERVERS: kafka-1:9092,kafka-2:9093,kafka-3:9094
+      KAFKA_CLIENT_ID: ss7-ha-gateway-node-1
+      M3UA_LOCAL_PORT: 2905
+    ports:
+      - "2905:2905"  # M3UA SCTP
+      - "9090:9090"  # Prometheus metrics
+    networks:
+      - ss7-network
+
+  ss7-ha-gateway-2:
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile.ss7-ha-gateway
+    container_name: ss7-ha-gateway-2
+    depends_on:
+      - redis-cluster-init
+      - kafka-1
+      - kafka-2
+      - kafka-3
+    environment:
+      NODE_ID: 2
+      REDIS_CLUSTER_NODES: redis-node-1:7000,redis-node-2:7001,redis-node-3:7002,redis-node-4:7003,redis-node-5:7004,redis-node-6:7005
+      KAFKA_BOOTSTRAP_SERVERS: kafka-1:9092,kafka-2:9093,kafka-3:9094
+      KAFKA_CLIENT_ID: ss7-ha-gateway-node-2
+      M3UA_LOCAL_PORT: 2906
+    ports:
+      - "2906:2906"  # M3UA SCTP
+      - "9091:9090"  # Prometheus metrics
+    networks:
+      - ss7-network
+
+  ss7-ha-gateway-3:
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile.ss7-ha-gateway
+    container_name: ss7-ha-gateway-3
+    depends_on:
+      - redis-cluster-init
+      - kafka-1
+      - kafka-2
+      - kafka-3
+    environment:
+      NODE_ID: 3
+      REDIS_CLUSTER_NODES: redis-node-1:7000,redis-node-2:7001,redis-node-3:7002,redis-node-4:7003,redis-node-5:7004,redis-node-6:7005
+      KAFKA_BOOTSTRAP_SERVERS: kafka-1:9092,kafka-2:9093,kafka-3:9094
+      KAFKA_CLIENT_ID: ss7-ha-gateway-node-3
+      M3UA_LOCAL_PORT: 2907
+    ports:
+      - "2907:2907"  # M3UA SCTP
+      - "9092:9090"  # Prometheus metrics
+    networks:
+      - ss7-network
+
+  #
+  # SMSC Gateway (2 nodes - AGPL-FREE!)
+  #
+  smsc-gateway-1:
+    build:
+      context: ../../smsc-gateway
+      dockerfile: docker/Dockerfile
+    container_name: smsc-gateway-1
+    depends_on:
+      - kafka-1
+      - kafka-2
+      - kafka-3
+    environment:
+      NODE_ID: 1
+      KAFKA_BOOTSTRAP_SERVERS: kafka-1:9092,kafka-2:9093,kafka-3:9094
+      KAFKA_CONSUMER_GROUP: smsc-gateway
+      KAFKA_TOPICS: ss7.sms.mo.incoming
+    ports:
+      - "8080:8080"  # HTTP API
+      - "9100:9090"  # Prometheus metrics
+    networks:
+      - ss7-network
+
+  smsc-gateway-2:
+    build:
+      context: ../../smsc-gateway
+      dockerfile: docker/Dockerfile
+    container_name: smsc-gateway-2
+    depends_on:
+      - kafka-1
+      - kafka-2
+      - kafka-3
+    environment:
+      NODE_ID: 2
+      KAFKA_BOOTSTRAP_SERVERS: kafka-1:9092,kafka-2:9093,kafka-3:9094
+      KAFKA_CONSUMER_GROUP: smsc-gateway
+      KAFKA_TOPICS: ss7.sms.mo.incoming
+    ports:
+      - "8081:8080"  # HTTP API
+      - "9101:9090"  # Prometheus metrics
+    networks:
+      - ss7-network
+
+  #
+  # Prometheus (Monitoring)
+  #
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+    ports:
+      - "9000:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    networks:
+      - ss7-network
+
+  #
+  # Grafana (Dashboards)
+  #
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: redis-datasource
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+    networks:
+      - ss7-network
+
+networks:
+  ss7-network:
+    driver: bridge
+
+volumes:
+  # Redis volumes
+  redis-node-1-data:
+  redis-node-2-data:
+  redis-node-3-data:
+  redis-node-4-data:
+  redis-node-5-data:
+  redis-node-6-data:
+
+  # Zookeeper volumes
+  zookeeper-data:
+  zookeeper-logs:
+
+  # Kafka volumes
+  kafka-1-data:
+  kafka-2-data:
+  kafka-3-data:
+
+  # Monitoring volumes
+  prometheus-data:
+  grafana-data:

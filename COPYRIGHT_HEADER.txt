@@ -1,0 +1,41 @@
+/*
+ * SS7 HA Gateway - High Availability SS7 Protocol Gateway
+ * Copyright (C) 2025 3eAI Labs
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ *
+ * Source code available at: https://github.com/3eAI-labs/ss7-ha-gateway
+ */
+
+================================================================================
+
+To add this header to all Java source files, run:
+
+find . -name "*.java" -type f -exec sed -i '1s/^/[PASTE_HEADER_HERE]\n/' {} \;
+
+Or use this script:
+
+#!/bin/bash
+HEADER=$(cat COPYRIGHT_HEADER.txt)
+
+find . -name "*.java" -type f | while read file; do
+    # Check if file already has copyright
+    if ! grep -q "Copyright (C)" "$file"; then
+        # Add header
+        echo "$HEADER" | cat - "$file" > temp && mv temp "$file"
+        echo "Added header to: $file"
+    fi
+done
+
+================================================================================

@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    
+    <modelVersion>4.0.0</modelVersion>
+    
+    <groupId>com.company.ss7ha</groupId>
+    <artifactId>ss7-ha-gateway-parent</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+    
+    <name>SS7 HA Gateway Parent</name>
+    <description>High Availability SS7 Gateway with Kafka integration for MAP/CAP operations</description>
+    
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.source>1.8</maven.compiler.source>
+        <maven.compiler.target>1.8</maven.compiler.target>
+        
+        <!-- Corsac JSS7 version (AGPL-3.0 - Mobius Software) -->
+        <jss7.corsac.version>10.0.58</jss7.corsac.version>
+
+        <!-- Kafka version -->
+        <kafka.version>3.5.1</kafka.version>
+
+        <!-- Redis version -->
+        <jedis.version>5.0.2</jedis.version>
+
+        <!-- Other dependencies -->
+        <jackson.version>2.15.2</jackson.version>
+        <log4j.version>1.2.17</log4j.version>
+        <slf4j.version>1.7.36</slf4j.version>
+        <junit.version>4.13.2</junit.version>
+        <commons-lang3.version>3.12.0</commons-lang3.version>
+        <guava.version>32.1.1-jre</guava.version>
+    </properties>
+
+    <modules>
+        <module>ss7-core</module>
+        <module>ss7-kafka-bridge</module>
+        <module>ss7-ha-manager</module>
+    </modules>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- Corsac JSS7 Stack Dependencies (AGPL-3.0) -->
+            <!-- Mobius Software version - Latest stable -->
+            <dependency>
+                <groupId>com.mobius-software.protocols.ss7.map</groupId>
+                <artifactId>map-api</artifactId>
+                <version>${jss7.corsac.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.mobius-software.protocols.ss7.map</groupId>
+                <artifactId>map-impl</artifactId>
+                <version>${jss7.corsac.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.mobius-software.protocols.ss7.cap</groupId>
+                <artifactId>cap-api</artifactId>
+                <version>${jss7.corsac.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.mobius-software.protocols.ss7.cap</groupId>
+                <artifactId>cap-impl</artifactId>
+                <version>${jss7.corsac.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.mobius-software.protocols.ss7.tcap</groupId>
+                <artifactId>tcap-api</artifactId>
+                <version>${jss7.corsac.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.mobius-software.protocols.ss7.tcap</groupId>
+                <artifactId>tcap-impl</artifactId>
+                <version>${jss7.corsac.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.mobius-software.protocols.ss7.sccp</groupId>
+                <artifactId>sccp-api</artifactId>
+                <version>${jss7.corsac.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.mobius-software.protocols.ss7.sccp</groupId>
+                <artifactId>sccp-impl</artifactId>
+                <version>${jss7.corsac.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.mobius-software.protocols.ss7.m3ua</groupId>
+                <artifactId>m3ua-api</artifactId>
+                <version>${jss7.corsac.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.mobius-software.protocols.ss7.m3ua</groupId>
+                <artifactId>m3ua-impl</artifactId>
+                <version>${jss7.corsac.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.mobius-software.protocols.ss7.mtp</groupId>
+                <artifactId>mtp-api</artifactId>
+                <version>${jss7.corsac.version}</version>
+            </dependency>
+
+            <!-- Redis Client (Apache-2.0 - License Safe!) -->
+            <dependency>
+                <groupId>redis.clients</groupId>
+                <artifactId>jedis</artifactId>
+                <version>${jedis.version}</version>
+            </dependency>
+            
+            <!-- Kafka Dependencies -->
+            <dependency>
+                <groupId>org.apache.kafka</groupId>
+                <artifactId>kafka-clients</artifactId>
+                <version>${kafka.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.kafka</groupId>
+                <artifactId>kafka-streams</artifactId>
+                <version>${kafka.version}</version>
+            </dependency>
+            
+            <!-- JSON Processing -->
+            <dependency>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-databind</artifactId>
+                <version>${jackson.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.jackson.datatype</groupId>
+                <artifactId>jackson-datatype-jsr310</artifactId>
+                <version>${jackson.version}</version>
+            </dependency>
+            
+            <!-- Utilities -->
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-lang3</artifactId>
+                <version>${commons-lang3.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.google.guava</groupId>
+                <artifactId>guava</artifactId>
+                <version>${guava.version}</version>
+            </dependency>
+            
+            <!-- Logging -->
+            <dependency>
+                <groupId>log4j</groupId>
+                <artifactId>log4j</artifactId>
+                <version>${log4j.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.slf4j</groupId>
+                <artifactId>slf4j-api</artifactId>
+                <version>${slf4j.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.slf4j</groupId>
+                <artifactId>slf4j-log4j12</artifactId>
+                <version>${slf4j.version}</version>
+            </dependency>
+            
+            <!-- Testing -->
+            <dependency>
+                <groupId>junit</groupId>
+                <artifactId>junit</artifactId>
+                <version>${junit.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.kafka</groupId>
+                <artifactId>kafka-streams-test-utils</artifactId>
+                <version>${kafka.version}</version>
+                <scope>test</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+    
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>3.8.1</version>
+                    <configuration>
+                        <source>${maven.compiler.source}</source>
+                        <target>${maven.compiler.target}</target>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-shade-plugin</artifactId>
+                    <version>3.5.0</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+    
+</project>

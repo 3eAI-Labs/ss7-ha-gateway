@@ -1,0 +1,128 @@
+# Maven
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# Java
+*.class
+*.jar
+*.war
+*.ear
+*.log
+*.ctxt
+.mtj.tmp/
+hs_err_pid*
+replay_pid*
+
+# IDE - IntelliJ IDEA
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+.idea_modules/
+
+# IDE - Eclipse
+.project
+.classpath
+.settings/
+.metadata
+bin/
+tmp/
+*.tmp
+*.bak
+*.swp
+*~.nib
+local.properties
+.loadpath
+.recommenders
+
+# IDE - VS Code
+.vscode/
+*.code-workspace
+
+# IDE - NetBeans
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Configuration files with sensitive data
+**/config/**/
+*.properties
+!*.properties.example
+**/secrets/
+*.key
+*.pem
+*.p12
+*.jks
+*.keystore
+*.truststore
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+log/
+
+# Test outputs
+test-output/
+*.test
+coverage/
+.nyc_output/
+
+# Build artifacts
+dist/
+build/
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# Docker
+.dockerignore
+
+# Redis data
+dump.rdb
+appendonly.aof
+
+# Kafka data
+kafka-logs/
+
+# Credentials and secrets (BE VERY CAREFUL!)
+*credentials*
+*password*
+*secret*
+*token*
+*.crt
+*.csr
+
+# Application specific
+data/
+storage/
+
+# Keep example configuration files
+!config/**/*.example
+!config/**/*.template
