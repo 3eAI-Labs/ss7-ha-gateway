@@ -22,6 +22,9 @@
         <!-- Corsac JSS7 version (AGPL-3.0 - Mobius Software) -->
         <jss7.corsac.version>10.0.58</jss7.corsac.version>
 
+        <!-- Mobius Software dependencies -->
+        <mobius.timers.version>1.0.0-39</mobius.timers.version>
+
         <!-- Kafka version -->
         <kafka.version>3.5.1</kafka.version>
 
@@ -101,6 +104,18 @@
                 <groupId>com.mobius-software.protocols.ss7.mtp</groupId>
                 <artifactId>mtp-api</artifactId>
                 <version>${jss7.corsac.version}</version>
+            </dependency>
+
+            <!-- Mobius Software Common Dependencies -->
+            <dependency>
+                <groupId>com.mobius-software.protocols.ss7.common</groupId>
+                <artifactId>common</artifactId>
+                <version>${jss7.corsac.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.mobius-software</groupId>
+                <artifactId>mobius-timers</artifactId>
+                <version>${mobius.timers.version}</version>
             </dependency>
 
             <!-- Redis Client (Apache-2.0 - License Safe!) -->

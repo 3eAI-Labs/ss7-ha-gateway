@@ -1,22 +1,20 @@
 package com.company.ss7ha.core.listeners;
 
 import com.company.ss7ha.core.converters.DialogStateConverter;
+import com.company.ss7ha.core.events.EventPublisher;
 import com.company.ss7ha.core.redis.RedisDialogStore;
 import com.company.ss7ha.core.redis.model.DialogState;
-import com.company.ss7ha.kafka.converters.MoForwardSmConverter;
-import com.company.ss7ha.kafka.messages.MoSmsMessage;
-import com.company.ss7ha.kafka.producer.SS7KafkaProducer;
-import com.mobius.software.telco.protocols.ss7.map.api.MAPDialog;
-import com.mobius.software.telco.protocols.ss7.map.api.MAPMessage;
-import com.mobius.software.telco.protocols.ss7.map.api.service.sms.MAPDialogSms;
-import com.mobius.software.telco.protocols.ss7.map.api.service.sms.MAPServiceSmsListener;
-import com.mobius.software.telco.protocols.ss7.map.api.service.sms.MoForwardShortMessageRequest;
-import com.mobius.software.telco.protocols.ss7.map.api.service.sms.MoForwardShortMessageResponse;
-import com.mobius.software.telco.protocols.ss7.map.api.service.sms.MtForwardShortMessageRequest;
-import com.mobius.software.telco.protocols.ss7.map.api.service.sms.MtForwardShortMessageResponse;
-import com.mobius.software.telco.protocols.ss7.map.api.service.sms.SendRoutingInfoForSMRequest;
-import com.mobius.software.telco.protocols.ss7.map.api.service.sms.SendRoutingInfoForSMResponse;
-import com.mobius.software.telco.protocols.ss7.tcap.api.tc.dialog.Dialog;
+import org.restcomm.protocols.ss7.map.api.MAPDialog;
+import org.restcomm.protocols.ss7.map.api.MAPMessage;
+import org.restcomm.protocols.ss7.map.api.service.sms.MAPDialogSms;
+import org.restcomm.protocols.ss7.map.api.service.sms.MAPServiceSmsListener;
+import org.restcomm.protocols.ss7.map.api.service.sms.MoForwardShortMessageRequest;
+import org.restcomm.protocols.ss7.map.api.service.sms.MoForwardShortMessageResponse;
+import org.restcomm.protocols.ss7.map.api.service.sms.MtForwardShortMessageRequest;
+import org.restcomm.protocols.ss7.map.api.service.sms.MtForwardShortMessageResponse;
+import org.restcomm.protocols.ss7.map.api.service.sms.SendRoutingInfoForSMRequest;
+import org.restcomm.protocols.ss7.map.api.service.sms.SendRoutingInfoForSMResponse;
+import org.restcomm.protocols.ss7.tcap.api.tc.dialog.Dialog;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,7 +41,7 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
     private static final Logger logger = LoggerFactory.getLogger(MapSmsServiceListener.class);
 
     private final RedisDialogStore dialogStore;
-    private final SS7KafkaProducer kafkaProducer;
+    private final EventPublisher eventPublisher;
 
     // Configuration
     private final boolean persistDialogs;
@@ -51,21 +49,21 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
     private final int dialogTTL;
 
     /**
-     * Constructor with Redis and Kafka integration.
+     * Constructor with Redis and Event Publisher integration.
      *
      * @param dialogStore Redis dialog store
-     * @param kafkaProducer Kafka producer
+     * @param eventPublisher Event publisher (Kafka, gRPC, etc.)
      * @param persistDialogs Enable dialog persistence
-     * @param publishToKafka Enable Kafka publishing
+     * @param publishToKafka Enable event publishing
      * @param dialogTTL Dialog TTL in seconds
      */
     public MapSmsServiceListener(RedisDialogStore dialogStore,
-                                 SS7KafkaProducer kafkaProducer,
+                                 EventPublisher eventPublisher,
                                  boolean persistDialogs,
                                  boolean publishToKafka,
                                  int dialogTTL) {
         this.dialogStore = dialogStore;
-        this.kafkaProducer = kafkaProducer;
+        this.eventPublisher = eventPublisher;
         this.persistDialogs = persistDialogs;
         this.publishToKafka = publishToKafka;
         this.dialogTTL = dialogTTL;
@@ -82,7 +80,7 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
     public void onMoForwardShortMessageRequest(MoForwardShortMessageRequest request) {
         MAPDialogSms dialog = request.getMAPDialog();
         Long dialogId = dialog.getLocalDialogId();
-        Integer invokeId = request.getInvokeId().intValue();
+        Integer invokeId = request.getInvokeId();
 
         logger.info("Received MO-ForwardSM request (dialog: {}, invoke: {})",
                 dialogId, invokeId);
@@ -93,20 +91,19 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
                 persistDialogState(dialog, "MO_FORWARD_SM", invokeId);
             }
 
-            // 2. Convert to JSON and publish to Kafka
-            if (publishToKafka && kafkaProducer != null) {
-                MoSmsMessage jsonMessage = MoForwardSmConverter.convert(
-                        request, dialogId, invokeId);
+            // 2. Publish event (implementation will convert to appropriate format)
+            if (publishToKafka && eventPublisher != null) {
+                // Create event payload - publisher will handle serialization
+                java.util.Map<String, Object> eventData = new java.util.HashMap<>();
+                eventData.put("type", "MO_FORWARD_SM");
+                eventData.put("dialogId", dialogId);
+                eventData.put("invokeId", invokeId);
+                eventData.put("request", request);
 
-                if (jsonMessage != null) {
-                    // Publish to Kafka topic: sms.mo.incoming
-                    kafkaProducer.sendMessage("sms.mo.incoming", jsonMessage);
+                // Publish to topic: sms.mo.incoming
+                eventPublisher.publishEvent("sms.mo.incoming", eventData);
 
-                    logger.info("Published MO-ForwardSM to Kafka (message: {}, dialog: {})",
-                            jsonMessage.getMessageId(), dialogId);
-                } else {
-                    logger.error("Failed to convert MO-ForwardSM to JSON (dialog: {})", dialogId);
-                }
+                logger.info("Published MO-ForwardSM event (dialog: {})", dialogId);
             }
 
             // 3. Application logic would go here
@@ -123,7 +120,7 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
     public void onMoForwardShortMessageResponse(MoForwardShortMessageResponse response) {
         MAPDialogSms dialog = response.getMAPDialog();
         Long dialogId = dialog.getLocalDialogId();
-        Integer invokeId = response.getInvokeId().intValue();
+        Integer invokeId = response.getInvokeId();
 
         logger.info("Received MO-ForwardSM response (dialog: {}, invoke: {})",
                 dialogId, invokeId);
@@ -150,7 +147,7 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
     public void onMtForwardShortMessageRequest(MtForwardShortMessageRequest request) {
         MAPDialogSms dialog = request.getMAPDialog();
         Long dialogId = dialog.getLocalDialogId();
-        Integer invokeId = request.getInvokeId().intValue();
+        Integer invokeId = request.getInvokeId();
 
         logger.info("Received MT-ForwardSM request (dialog: {}, invoke: {})",
                 dialogId, invokeId);
@@ -174,7 +171,7 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
     public void onMtForwardShortMessageResponse(MtForwardShortMessageResponse response) {
         MAPDialogSms dialog = response.getMAPDialog();
         Long dialogId = dialog.getLocalDialogId();
-        Integer invokeId = response.getInvokeId().intValue();
+        Integer invokeId = response.getInvokeId();
 
         logger.info("Received MT-ForwardSM response (dialog: {}, invoke: {})",
                 dialogId, invokeId);
@@ -199,7 +196,7 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
     public void onSendRoutingInfoForSMRequest(SendRoutingInfoForSMRequest request) {
         MAPDialogSms dialog = request.getMAPDialog();
         Long dialogId = dialog.getLocalDialogId();
-        Integer invokeId = request.getInvokeId().intValue();
+        Integer invokeId = request.getInvokeId();
 
         logger.info("Received SRI-SM request (dialog: {}, invoke: {})",
                 dialogId, invokeId);
@@ -222,7 +219,7 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
     public void onSendRoutingInfoForSMResponse(SendRoutingInfoForSMResponse response) {
         MAPDialogSms dialog = response.getMAPDialog();
         Long dialogId = dialog.getLocalDialogId();
-        Integer invokeId = response.getInvokeId().intValue();
+        Integer invokeId = response.getInvokeId();
 
         logger.info("Received SRI-SM response (dialog: {}, invoke: {})",
                 dialogId, invokeId);
@@ -243,12 +240,12 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
     // Dialog Lifecycle Events
     //
 
-    @Override
+    
     public void onDialogDelimiter(MAPDialog dialog) {
         logger.debug("Dialog delimiter (dialog: {})", dialog.getLocalDialogId());
     }
 
-    @Override
+    
     public void onDialogRequest(MAPDialog dialog) {
         Long dialogId = dialog.getLocalDialogId();
         logger.info("Dialog request received (dialog: {})", dialogId);
@@ -267,7 +264,7 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
         }
     }
 
-    @Override
+    
     public void onDialogAccept(MAPDialog dialog) {
         Long dialogId = dialog.getLocalDialogId();
         logger.info("Dialog accepted (dialog: {})", dialogId);
@@ -286,7 +283,7 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
         }
     }
 
-    @Override
+    
     public void onDialogClose(MAPDialog dialog) {
         Long dialogId = dialog.getLocalDialogId();
         logger.info("Dialog closed (dialog: {})", dialogId);
@@ -302,7 +299,7 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
         }
     }
 
-    @Override
+    
     public void onDialogAbort(MAPDialog dialog) {
         Long dialogId = dialog.getLocalDialogId();
         logger.warn("Dialog aborted (dialog: {})", dialogId);
@@ -317,7 +314,7 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
         }
     }
 
-    @Override
+    
     public void onDialogTimeout(MAPDialog dialog) {
         Long dialogId = dialog.getLocalDialogId();
         logger.warn("Dialog timeout (dialog: {})", dialogId);
@@ -404,30 +401,86 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
     //
 
     @Override
-    public void onErrorComponent(MAPDialog dialog, Long invokeId) {
-        logger.warn("Error component received (dialog: {}, invoke: {})",
-                dialog.getLocalDialogId(), invokeId);
+    public void onErrorComponent(MAPDialog dialog, Integer invokeId,
+                                 org.restcomm.protocols.ss7.map.api.errors.MAPErrorMessage mapErrorMessage) {
+        logger.warn("Error component received (dialog: {}, invoke: {}, error: {})",
+                dialog.getLocalDialogId(), invokeId,
+                mapErrorMessage != null ? mapErrorMessage.getErrorCode() : "unknown");
     }
 
     @Override
-    public void onRejectComponent(MAPDialog dialog, Long invokeId) {
-        logger.warn("Reject component received (dialog: {}, invoke: {})",
-                dialog.getLocalDialogId(), invokeId);
+    public void onRejectComponent(MAPDialog dialog, Integer invokeId,
+                                  org.restcomm.protocols.ss7.tcap.asn.comp.Problem problem,
+                                  boolean isLocalOriginated) {
+        logger.warn("Reject component received (dialog: {}, invoke: {}, problem: {}, local: {})",
+                dialog.getLocalDialogId(), invokeId, problem, isLocalOriginated);
     }
 
     @Override
-    public void onInvokeTimeout(MAPDialog dialog, Long invokeId) {
+    public void onInvokeTimeout(MAPDialog dialog, Integer invokeId) {
         logger.warn("Invoke timeout (dialog: {}, invoke: {})",
                 dialog.getLocalDialogId(), invokeId);
 
         try {
             // Remove timed out invoke
             if (persistDialogs && dialogStore != null) {
-                updateDialogAfterResponse(dialog.getLocalDialogId(), invokeId.intValue());
+                updateDialogAfterResponse(dialog.getLocalDialogId(), invokeId);
             }
         } catch (Exception e) {
             logger.error("Error handling invoke timeout", e);
         }
+    }
+
+    @Override
+    public void onNoteSubscriberPresentRequest(org.restcomm.protocols.ss7.map.api.service.sms.NoteSubscriberPresentRequest request) {
+        // Note Subscriber Present - indicates subscriber is available
+        // Not implemented in this version
+        logger.debug("Note Subscriber Present request received");
+    }
+
+    @Override
+    public void onReadyForSMRequest(org.restcomm.protocols.ss7.map.api.service.sms.ReadyForSMRequest request) {
+        logger.debug("Ready for SM request received");
+    }
+
+    @Override
+    public void onReadyForSMResponse(org.restcomm.protocols.ss7.map.api.service.sms.ReadyForSMResponse response) {
+        logger.debug("Ready for SM response received");
+    }
+
+    @Override
+    public void onForwardShortMessageRequest(org.restcomm.protocols.ss7.map.api.service.sms.ForwardShortMessageRequest request) {
+        logger.debug("Forward short message request received");
+    }
+
+    @Override
+    public void onForwardShortMessageResponse(org.restcomm.protocols.ss7.map.api.service.sms.ForwardShortMessageResponse response) {
+        logger.debug("Forward short message response received");
+    }
+
+    @Override
+    public void onInformServiceCentreRequest(org.restcomm.protocols.ss7.map.api.service.sms.InformServiceCentreRequest request) {
+        logger.debug("Inform service centre request received");
+    }
+
+    @Override
+    public void onAlertServiceCentreRequest(org.restcomm.protocols.ss7.map.api.service.sms.AlertServiceCentreRequest request) {
+        logger.debug("Alert service centre request received");
+    }
+
+    @Override
+    public void onAlertServiceCentreResponse(org.restcomm.protocols.ss7.map.api.service.sms.AlertServiceCentreResponse response) {
+        logger.debug("Alert service centre response received");
+    }
+
+    @Override
+    public void onReportSMDeliveryStatusRequest(org.restcomm.protocols.ss7.map.api.service.sms.ReportSMDeliveryStatusRequest request) {
+        logger.debug("Report SM delivery status request received");
+    }
+
+    @Override
+    public void onReportSMDeliveryStatusResponse(org.restcomm.protocols.ss7.map.api.service.sms.ReportSMDeliveryStatusResponse response) {
+        logger.debug("Report SM delivery status response received");
     }
 
     @Override

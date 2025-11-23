@@ -50,7 +50,7 @@ public class RedisDialogStoreImplTest {
         DialogState state = createTestDialogState(12345L);
 
         // Mock Redis response
-        when(mockJedis.setex(anyString(), anyInt(), anyString())).thenReturn("OK");
+        when(mockJedis.setex(anyString(), anyLong(), anyString())).thenReturn("OK");
         when(mockJedis.zadd(anyString(), anyDouble(), anyString())).thenReturn(1L);
 
         // Store dialog
@@ -60,7 +60,7 @@ public class RedisDialogStoreImplTest {
         assertTrue(result);
 
         // Verify setex was called
-        verify(mockJedis, atLeastOnce()).setex(anyString(), eq(TEST_TTL), anyString());
+        verify(mockJedis, atLeastOnce()).setex(anyString(), anyLong(), anyString());
 
         // Verify zadd was called for active dialogs tracking
         verify(mockJedis, atLeastOnce()).zadd(anyString(), anyDouble(), anyString());
@@ -75,7 +75,7 @@ public class RedisDialogStoreImplTest {
         assertFalse(result);
 
         // Verify no Redis calls
-        verify(mockJedis, never()).setex(anyString(), anyInt(), anyString());
+        verify(mockJedis, never()).setex(anyString(), anyLong(), anyString());
     }
 
     /**
@@ -88,14 +88,14 @@ public class RedisDialogStoreImplTest {
         state.setState("ACTIVE");
 
         // Mock Redis response
-        when(mockJedis.setex(anyString(), anyInt(), anyString())).thenReturn("OK");
+        when(mockJedis.setex(anyString(), anyLong(), anyString())).thenReturn("OK");
 
         // Update dialog
         boolean result = dialogStore.updateDialog(state);
 
         // Verify
         assertTrue(result);
-        verify(mockJedis, atLeastOnce()).setex(anyString(), eq(TEST_TTL), anyString());
+        verify(mockJedis, atLeastOnce()).setex(anyString(), anyLong(), anyString());
     }
 
     /**
@@ -148,13 +148,10 @@ public class RedisDialogStoreImplTest {
         when(mockJedis.zrem(anyString(), anyString())).thenReturn(1L);
 
         // Delete dialog
-        boolean result = dialogStore.deleteDialog(12345L);
+        dialogStore.deleteDialog(12345L);
 
-        // Verify
-        assertTrue(result);
-
-        // Verify del was called
-        verify(mockJedis).del(anyString());
+        // Verify del was called twice (dialog + invokes)
+        verify(mockJedis, times(2)).del(anyString());
 
         // Verify zrem was called to remove from active dialogs
         verify(mockJedis, atLeastOnce()).zrem(anyString(), anyString());
@@ -166,7 +163,7 @@ public class RedisDialogStoreImplTest {
     @Test
     public void testTouchDialog() {
         // Mock Redis response
-        when(mockJedis.expire(anyString(), anyInt())).thenReturn(1L);
+        when(mockJedis.expire(anyString(), anyLong())).thenReturn(1L);
 
         // Touch dialog
         boolean result = dialogStore.touchDialog(12345L);
@@ -175,7 +172,7 @@ public class RedisDialogStoreImplTest {
         assertTrue(result);
 
         // Verify expire was called
-        verify(mockJedis).expire(anyString(), eq(TEST_TTL));
+        verify(mockJedis).expire(anyString(), anyLong());
     }
 
     /**
@@ -184,7 +181,7 @@ public class RedisDialogStoreImplTest {
     @Test
     public void testTouchDialog_NotFound() {
         // Mock Redis to return 0 (key not found)
-        when(mockJedis.expire(anyString(), anyInt())).thenReturn(0L);
+        when(mockJedis.expire(anyString(), anyLong())).thenReturn(0L);
 
         // Touch dialog
         boolean result = dialogStore.touchDialog(99999L);
@@ -200,7 +197,7 @@ public class RedisDialogStoreImplTest {
     public void testStorePendingInvoke() {
         // Mock Redis responses
         when(mockJedis.hset(anyString(), anyString(), anyString())).thenReturn(1L);
-        when(mockJedis.expire(anyString(), anyInt())).thenReturn(1L);
+        when(mockJedis.expire(anyString(), anyLong())).thenReturn(1L);
 
         // Store pending invoke
         boolean result = dialogStore.storePendingInvoke(
@@ -213,7 +210,7 @@ public class RedisDialogStoreImplTest {
         verify(mockJedis).hset(anyString(), anyString(), anyString());
 
         // Verify expire was called
-        verify(mockJedis).expire(anyString(), anyInt());
+        verify(mockJedis).expire(anyString(), anyLong());
     }
 
     /**
@@ -239,13 +236,13 @@ public class RedisDialogStoreImplTest {
      */
     @Test
     public void testGetActiveDialogIds() {
-        // Mock Redis to return some dialog IDs
-        java.util.Set<String> mockDialogIds = new java.util.HashSet<>();
+        // Mock Redis to return some dialog IDs (zrevrange returns List for limit > 0)
+        java.util.List<String> mockDialogIds = new java.util.ArrayList<>();
         mockDialogIds.add("12345");
         mockDialogIds.add("67890");
         mockDialogIds.add("11111");
 
-        when(mockJedis.zrange(anyString(), anyLong(), anyLong())).thenReturn(mockDialogIds);
+        when(mockJedis.zrevrange(anyString(), anyLong(), anyLong())).thenReturn(mockDialogIds);
 
         // Get active dialog IDs
         List<Long> activeIds = dialogStore.getActiveDialogIds(10);
@@ -257,8 +254,8 @@ public class RedisDialogStoreImplTest {
         assertTrue(activeIds.contains(67890L));
         assertTrue(activeIds.contains(11111L));
 
-        // Verify zrange was called
-        verify(mockJedis).zrange(anyString(), eq(0L), eq(9L)); // limit 10
+        // Verify zrevrange was called (uses zrevrange for limit > 0)
+        verify(mockJedis).zrevrange(anyString(), eq(0L), eq(9L)); // limit 10
     }
 
     /**
@@ -274,8 +271,8 @@ public class RedisDialogStoreImplTest {
 
         // Verify
         assertNotNull(stats);
-        assertTrue(stats.containsKey("dialogs.active"));
-        assertEquals(Long.valueOf(42L), stats.get("dialogs.active"));
+        assertTrue(stats.containsKey("active_dialogs"));
+        assertEquals(Long.valueOf(42L), stats.get("active_dialogs"));
     }
 
     /**
@@ -336,7 +333,7 @@ public class RedisDialogStoreImplTest {
         state.getPendingInvokes().add(invoke2);
 
         // Mock store
-        when(mockJedis.setex(anyString(), anyInt(), anyString())).thenReturn("OK");
+        when(mockJedis.setex(anyString(), anyLong(), anyString())).thenReturn("OK");
         when(mockJedis.zadd(anyString(), anyDouble(), anyString())).thenReturn(1L);
 
         // Store

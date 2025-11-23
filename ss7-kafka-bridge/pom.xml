@@ -42,11 +42,11 @@
         
         <!-- JSS7 Dependencies -->
         <dependency>
-            <groupId>org.restcomm.protocols.ss7.map</groupId>
+            <groupId>com.mobius-software.protocols.ss7.map</groupId>
             <artifactId>map-api</artifactId>
         </dependency>
         <dependency>
-            <groupId>org.restcomm.protocols.ss7.cap</groupId>
+            <groupId>com.mobius-software.protocols.ss7.cap</groupId>
             <artifactId>cap-api</artifactId>
         </dependency>
         
@@ -66,6 +66,12 @@
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <version>3.12.4</version>
             <scope>test</scope>
         </dependency>
         <dependency>

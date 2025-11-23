@@ -2,9 +2,9 @@ package com.company.ss7ha.core.converters;
 
 import com.company.ss7ha.core.redis.model.DialogState;
 import com.company.ss7ha.core.redis.model.PendingInvoke;
-import com.mobius.software.telco.protocols.ss7.sccp.parameter.SccpAddress;
-import com.mobius.software.telco.protocols.ss7.tcap.api.tc.dialog.Dialog;
-import com.mobius.software.telco.protocols.ss7.tcap.api.tc.dialog.DialogState;
+import org.restcomm.protocols.ss7.sccp.parameter.SccpAddress;
+import org.restcomm.protocols.ss7.tcap.api.tc.dialog.Dialog;
+import org.restcomm.protocols.ss7.tcap.api.tc.dialog.TRPseudoState;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mock;
@@ -47,7 +47,7 @@ public class DialogStateConverterTest {
         // Setup mock dialog
         when(mockDialog.getLocalDialogId()).thenReturn(12345L);
         when(mockDialog.getRemoteDialogId()).thenReturn(67890L);
-        when(mockDialog.getState()).thenReturn(DialogState.ACTIVE);
+        when(mockDialog.getState()).thenReturn(TRPseudoState.Active);
         when(mockDialog.getNetworkId()).thenReturn(1);
 
         // Convert
@@ -58,7 +58,7 @@ public class DialogStateConverterTest {
         assertNotNull(state);
         assertEquals(Long.valueOf(12345L), state.getDialogId());
         assertEquals(Long.valueOf(67890L), state.getRemoteDialogId());
-        assertEquals("ACTIVE", state.getState());
+        assertEquals("Active", state.getState());
         assertEquals(Integer.valueOf(1), state.getNetworkId());
         assertNotNull(state.getCreatedAt());
         assertNotNull(state.getLastActivity());
@@ -72,7 +72,7 @@ public class DialogStateConverterTest {
     @Test
     public void testFromDialog_NullDialog() {
         com.company.ss7ha.core.redis.model.DialogState state =
-            DialogStateConverter.fromDialog(null);
+            DialogStateConverter.fromDialog((Dialog)null);
 
         assertNull(state);
     }
@@ -84,19 +84,23 @@ public class DialogStateConverterTest {
     public void testFromDialog_WithAddressing() {
         // Setup mock dialog with addresses
         when(mockDialog.getLocalDialogId()).thenReturn(12345L);
-        when(mockDialog.getState()).thenReturn(DialogState.ACTIVE);
+        when(mockDialog.getState()).thenReturn(TRPseudoState.Active);
         when(mockDialog.getLocalAddress()).thenReturn(mockLocalAddress);
         when(mockDialog.getRemoteAddress()).thenReturn(mockRemoteAddress);
 
+        // Create mock global titles first
+        org.restcomm.protocols.ss7.sccp.parameter.GlobalTitle mockLocalGT = createMockGT("123456789");
+        org.restcomm.protocols.ss7.sccp.parameter.GlobalTitle mockRemoteGT = createMockGT("987654321");
+
         // Mock local address
-        when(mockLocalAddress.getGlobalTitle()).thenReturn(createMockGT("123456789"));
+        when(mockLocalAddress.getGlobalTitle()).thenReturn(mockLocalGT);
         when(mockLocalAddress.getSubsystemNumber()).thenReturn(8);
-        when(mockLocalAddress.getPointCode()).thenReturn(1);
+        when(mockLocalAddress.getSignalingPointCode()).thenReturn(1);
 
         // Mock remote address
-        when(mockRemoteAddress.getGlobalTitle()).thenReturn(createMockGT("987654321"));
+        when(mockRemoteAddress.getGlobalTitle()).thenReturn(mockRemoteGT);
         when(mockRemoteAddress.getSubsystemNumber()).thenReturn(6);
-        when(mockRemoteAddress.getPointCode()).thenReturn(2);
+        when(mockRemoteAddress.getSignalingPointCode()).thenReturn(2);
 
         // Convert
         com.company.ss7ha.core.redis.model.DialogState state =
@@ -128,17 +132,17 @@ public class DialogStateConverterTest {
         // Setup mock dialog with updated state
         when(mockDialog.getLocalDialogId()).thenReturn(12345L);
         when(mockDialog.getRemoteDialogId()).thenReturn(67890L);
-        when(mockDialog.getState()).thenReturn(DialogState.ACTIVE);
+        when(mockDialog.getState()).thenReturn(TRPseudoState.Active);
 
         long beforeUpdate = System.currentTimeMillis();
 
         // Update
         com.company.ss7ha.core.redis.model.DialogState updated =
-            DialogStateConverter.updateFromDialog(state, mockDialog);
+            DialogStateConverter.updateFromDialog(state, (Dialog)mockDialog);
 
         // Verify
         assertSame(state, updated);
-        assertEquals("ACTIVE", updated.getState());
+        assertEquals("Active", updated.getState());
         assertEquals(Long.valueOf(67890L), updated.getRemoteDialogId());
         assertTrue(updated.getLastActivity() >= beforeUpdate);
         assertEquals(state.getCreatedAt(), updated.getCreatedAt()); // Should not change
@@ -154,12 +158,12 @@ public class DialogStateConverterTest {
 
         // Update with null dialog
         com.company.ss7ha.core.redis.model.DialogState result1 =
-            DialogStateConverter.updateFromDialog(state, null);
+            DialogStateConverter.updateFromDialog(state, (Dialog)null);
         assertSame(state, result1);
 
         // Update null state
         com.company.ss7ha.core.redis.model.DialogState result2 =
-            DialogStateConverter.updateFromDialog(null, mockDialog);
+            DialogStateConverter.updateFromDialog(null, (Dialog)mockDialog);
         assertNull(result2);
     }
 
@@ -321,9 +325,9 @@ public class DialogStateConverterTest {
     /**
      * Helper method to create mock GlobalTitle.
      */
-    private com.mobius.software.telco.protocols.ss7.sccp.parameter.GlobalTitle createMockGT(String digits) {
-        com.mobius.software.telco.protocols.ss7.sccp.parameter.GlobalTitle mockGT =
-            mock(com.mobius.software.telco.protocols.ss7.sccp.parameter.GlobalTitle.class);
+    private org.restcomm.protocols.ss7.sccp.parameter.GlobalTitle createMockGT(String digits) {
+        org.restcomm.protocols.ss7.sccp.parameter.GlobalTitle mockGT =
+            mock(org.restcomm.protocols.ss7.sccp.parameter.GlobalTitle.class);
         when(mockGT.getDigits()).thenReturn(digits);
         return mockGT;
     }

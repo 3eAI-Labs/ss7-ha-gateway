@@ -64,6 +64,16 @@
             <artifactId>mtp-api</artifactId>
         </dependency>
 
+        <!-- Mobius Software Common Dependencies (AGPL-3.0) -->
+        <dependency>
+            <groupId>com.mobius-software.protocols.ss7.common</groupId>
+            <artifactId>common</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.mobius-software</groupId>
+            <artifactId>mobius-timers</artifactId>
+        </dependency>
+
         <!-- Redis Client (Apache-2.0 license - safe!) -->
         <dependency>
             <groupId>redis.clients</groupId>
@@ -104,6 +114,12 @@
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <version>3.12.4</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

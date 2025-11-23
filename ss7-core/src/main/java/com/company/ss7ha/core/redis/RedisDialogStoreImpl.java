@@ -303,7 +303,7 @@ public class RedisDialogStoreImpl implements RedisDialogStore {
     @Override
     public List<Long> getActiveDialogIds(int limit) {
         try {
-            Set<String> dialogIds;
+            List<String> dialogIds;
 
             if (limit > 0) {
                 // Get most recent N dialogs
@@ -328,7 +328,7 @@ public class RedisDialogStoreImpl implements RedisDialogStore {
     public List<Long> getActiveDialogIdsByNetwork(int networkId, int limit) {
         try {
             String networkKey = NETWORK_DIALOGS_PREFIX + networkId;
-            Set<String> dialogIds;
+            List<String> dialogIds;
 
             if (limit > 0) {
                 dialogIds = jedisCluster.zrevrange(networkKey, 0, limit - 1);

@@ -1,18 +1,22 @@
 package com.company.ss7ha.core;
 
+import com.company.ss7ha.core.events.EventPublisher;
 import com.company.ss7ha.core.listeners.MapSmsServiceListener;
 import com.company.ss7ha.core.redis.RedisDialogStore;
 import com.company.ss7ha.core.redis.RedisDialogStoreImpl;
-import com.company.ss7ha.kafka.producer.SS7KafkaProducer;
-import com.mobius.software.telco.protocols.ss7.m3ua.api.M3UAManagement;
-import com.mobius.software.telco.protocols.ss7.m3ua.impl.M3UAManagementImpl;
-import com.mobius.software.telco.protocols.ss7.map.api.MAPProvider;
-import com.mobius.software.telco.protocols.ss7.map.api.MAPStack;
-import com.mobius.software.telco.protocols.ss7.map.impl.MAPStackImpl;
-import com.mobius.software.telco.protocols.ss7.sccp.api.SccpStack;
-import com.mobius.software.telco.protocols.ss7.sccp.impl.SccpStackImpl;
-import com.mobius.software.telco.protocols.ss7.tcap.api.TCAPStack;
-import com.mobius.software.telco.protocols.ss7.tcap.impl.TCAPStackImpl;
+import com.mobius.software.common.dal.timers.WorkerPool;
+import com.mobius.software.telco.protocols.ss7.common.UUIDGenerator;
+import org.restcomm.protocols.ss7.m3ua.M3UAManagement;
+import org.restcomm.protocols.ss7.m3ua.impl.M3UAManagementImpl;
+import org.restcomm.protocols.ss7.map.api.MAPProvider;
+import org.restcomm.protocols.ss7.map.api.MAPStack;
+import org.restcomm.protocols.ss7.map.MAPStackImpl;
+import org.restcomm.protocols.ss7.sccp.SccpProvider;
+import org.restcomm.protocols.ss7.sccp.SccpStack;
+import org.restcomm.protocols.ss7.sccp.impl.SccpStackImpl;
+import org.restcomm.protocols.ss7.tcap.api.TCAPProvider;
+import org.restcomm.protocols.ss7.tcap.api.TCAPStack;
+import org.restcomm.protocols.ss7.tcap.TCAPStackImpl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import redis.clients.jedis.JedisCluster;
@@ -23,11 +27,11 @@ import java.util.Properties;
 import java.util.Set;
 
 /**
- * SS7 HA Gateway Bootstrap
+ * SS7 HA Gateway Bootstrap (Corsac JSS7 API)
  *
  * This class demonstrates how to wire together:
  * - Redis dialog persistence
- * - Kafka message publishing
+ * - Event publishing (Kafka, gRPC, etc.)
  * - MAP service listeners
  * - SS7 stack (M3UA, SCCP, TCAP, MAP)
  *
@@ -36,7 +40,7 @@ import java.util.Set;
  * 2. MAP listener receives MO-ForwardSM
  * 3. Dialog state saved to Redis (primitive types)
  * 4. Message converted to JSON
- * 5. JSON published to Kafka
+ * 5. JSON published via EventPublisher
  * 6. Consumer (SMSC Gateway) processes JSON
  *
  * LICENSE: AGPL-3.0 (part of ss7-ha-gateway)
@@ -49,26 +53,30 @@ public class SS7HAGatewayBootstrap {
     private static final Logger logger = LoggerFactory.getLogger(SS7HAGatewayBootstrap.class);
 
     // SS7 Stack components
+    private WorkerPool workerPool;
+    private UUIDGenerator uuidGenerator;
     private M3UAManagement m3uaManagement;
     private SccpStack sccpStack;
     private TCAPStack tcapStack;
-    private MAPStack mapStack;
+    private MAPStackImpl mapStack;
 
     // HA components
     private RedisDialogStore dialogStore;
-    private SS7KafkaProducer kafkaProducer;
+    private EventPublisher eventPublisher;
     private MapSmsServiceListener smsServiceListener;
 
     // Configuration
     private final Properties config;
 
     /**
-     * Constructor with configuration.
+     * Constructor with configuration and event publisher.
      *
      * @param config Configuration properties
+     * @param eventPublisher Event publisher implementation (Kafka, gRPC, etc.)
      */
-    public SS7HAGatewayBootstrap(Properties config) {
+    public SS7HAGatewayBootstrap(Properties config, EventPublisher eventPublisher) {
         this.config = config;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -78,16 +86,15 @@ public class SS7HAGatewayBootstrap {
         logger.info("Starting SS7 HA Gateway...");
 
         try {
-            // 1. Initialize Redis dialog store
-            initializeRedis();
+            // 1. Initialize WorkerPool and UUIDGenerator
+            initializeWorkerPool();
 
-            // 2. Initialize Kafka producer
-            initializeKafka();
+            // 2. Initialize Redis dialog store
+            initializeRedis();
 
             // 3. Initialize SS7 stack
             initializeM3UA();
             initializeSCCP();
-            initializeTCAP();
             initializeMAP();
 
             // 4. Register MAP listeners
@@ -102,6 +109,23 @@ public class SS7HAGatewayBootstrap {
             logger.error("Failed to start SS7 HA Gateway", e);
             throw e;
         }
+    }
+
+    /**
+     * Initialize WorkerPool and UUIDGenerator.
+     */
+    private void initializeWorkerPool() throws Exception {
+        logger.info("Initializing WorkerPool...");
+
+        String stackName = config.getProperty("stack.name", "SS7-HA-Gateway");
+        workerPool = new WorkerPool(stackName + "-WorkerPool");
+        workerPool.start(4); // 4 worker threads
+
+        // Initialize UUIDGenerator (6-byte prefix)
+        byte[] prefix = new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x01 };
+        uuidGenerator = new UUIDGenerator(prefix);
+
+        logger.info("WorkerPool initialized with 4 threads");
     }
 
     /**
@@ -144,34 +168,6 @@ public class SS7HAGatewayBootstrap {
     }
 
     /**
-     * Initialize Kafka producer.
-     */
-    private void initializeKafka() {
-        logger.info("Initializing Kafka producer...");
-
-        try {
-            // Kafka configuration
-            Properties kafkaConfig = new Properties();
-            kafkaConfig.setProperty("bootstrap.servers",
-                    config.getProperty("kafka.bootstrap.servers", "localhost:9092"));
-            kafkaConfig.setProperty("client.id",
-                    config.getProperty("kafka.client.id", "ss7-ha-gateway"));
-
-            // Topic prefix
-            String topicPrefix = config.getProperty("kafka.topic.prefix", "ss7.");
-
-            // Create producer
-            kafkaProducer = new SS7KafkaProducer(kafkaConfig, topicPrefix);
-
-            logger.info("Kafka producer initialized successfully");
-
-        } catch (Exception e) {
-            logger.error("Failed to initialize Kafka", e);
-            throw new RuntimeException("Kafka initialization failed", e);
-        }
-    }
-
-    /**
      * Initialize M3UA layer.
      */
     private void initializeM3UA() {
@@ -180,13 +176,14 @@ public class SS7HAGatewayBootstrap {
         try {
             String m3uaName = config.getProperty("m3ua.name", "M3UA-STACK");
 
-            m3uaManagement = new M3UAManagementImpl(m3uaName, null);
+            // Corsac API: M3UAManagementImpl(name, persistDir, uuidGenerator, workerPool)
+            m3uaManagement = new M3UAManagementImpl(m3uaName, null, uuidGenerator, workerPool);
 
             // Configure M3UA (simplified - production needs full config)
             // - Add SCTP associations
             // - Add application servers
             // - Add routes
-            // See Mobius JSS7 documentation for details
+            // See Corsac JSS7 documentation for details
 
             logger.info("M3UA layer initialized");
 
@@ -205,8 +202,10 @@ public class SS7HAGatewayBootstrap {
         try {
             String sccpName = config.getProperty("sccp.name", "SCCP-STACK");
 
-            sccpStack = new SccpStackImpl(sccpName);
-            // sccpStack.setMtp3UserPart(1, m3uaManagement);
+            // Corsac API: SccpStackImpl(name, isStp, workerPool)
+            sccpStack = new SccpStackImpl(sccpName, false, workerPool);
+
+            // In Corsac, M3UA is set through management, not directly
 
             // Configure SCCP (simplified - production needs full config)
             // - Set local address
@@ -223,41 +222,24 @@ public class SS7HAGatewayBootstrap {
     }
 
     /**
-     * Initialize TCAP layer.
-     */
-    private void initializeTCAP() {
-        logger.info("Initializing TCAP layer...");
-
-        try {
-            String tcapName = config.getProperty("tcap.name", "TCAP-STACK");
-
-            tcapStack = new TCAPStackImpl(tcapName, sccpStack.getSccpProvider(), 8);
-
-            // Configure TCAP
-            tcapStack.setDialogIdleTimeout(60000);  // 60 seconds
-            tcapStack.setInvokeTimeout(30000);      // 30 seconds
-            tcapStack.setMaxDialogs(5000);
-
-            logger.info("TCAP layer initialized");
-
-        } catch (Exception e) {
-            logger.error("Failed to initialize TCAP", e);
-            throw new RuntimeException("TCAP initialization failed", e);
-        }
-    }
-
-    /**
-     * Initialize MAP layer.
+     * Initialize MAP layer (TCAP is created internally).
      */
     private void initializeMAP() {
         logger.info("Initializing MAP layer...");
 
         try {
             String mapName = config.getProperty("map.name", "MAP-STACK");
+            int ssn = Integer.parseInt(config.getProperty("sccp.local.ssn", "8"));
 
-            mapStack = new MAPStackImpl(mapName, tcapStack.getProvider());
+            // Corsac API: MAPStackImpl(name, sccpProvider, ssn, workerPool)
+            // This creates TCAP stack internally
+            SccpProvider sccpProvider = sccpStack.getSccpProvider();
+            mapStack = new MAPStackImpl(mapName, sccpProvider, ssn, workerPool);
 
-            logger.info("MAP layer initialized");
+            // TCAP configuration done through MAPStack
+            tcapStack = mapStack.getTCAPStack();
+
+            logger.info("MAP layer initialized with SSN: {}", ssn);
 
         } catch (Exception e) {
             logger.error("Failed to initialize MAP", e);
@@ -275,22 +257,22 @@ public class SS7HAGatewayBootstrap {
             // Configuration
             boolean persistDialogs = Boolean.parseBoolean(
                     config.getProperty("redis.persist.dialogs", "true"));
-            boolean publishToKafka = Boolean.parseBoolean(
-                    config.getProperty("kafka.publish.enabled", "true"));
+            boolean publishEvents = Boolean.parseBoolean(
+                    config.getProperty("events.publish.enabled", "true"));
             int dialogTTL = Integer.parseInt(
                     config.getProperty("redis.dialog.ttl", "3600"));
 
-            // Create SMS service listener with Redis + Kafka
+            // Create SMS service listener with Redis + Event Publisher
             smsServiceListener = new MapSmsServiceListener(
                     dialogStore,
-                    kafkaProducer,
+                    eventPublisher,
                     persistDialogs,
-                    publishToKafka,
+                    publishEvents,
                     dialogTTL
             );
 
             // Register with MAP stack
-            MAPProvider mapProvider = mapStack.getMAPProvider();
+            MAPProvider mapProvider = mapStack.getProvider();
             mapProvider.getMAPServiceSms().addMAPServiceListener(smsServiceListener);
 
             logger.info("MAP service listeners registered");
@@ -315,11 +297,8 @@ public class SS7HAGatewayBootstrap {
             sccpStack.start();
             logger.info("SCCP started");
 
-            tcapStack.start();
-            logger.info("TCAP started");
-
             mapStack.start();
-            logger.info("MAP started");
+            logger.info("MAP started (TCAP started internally)");
 
             logger.info("All SS7 stack components started successfully");
 
@@ -342,11 +321,6 @@ public class SS7HAGatewayBootstrap {
                 logger.info("MAP stopped");
             }
 
-            if (tcapStack != null) {
-                tcapStack.stop();
-                logger.info("TCAP stopped");
-            }
-
             if (sccpStack != null) {
                 sccpStack.stop();
                 logger.info("SCCP stopped");
@@ -357,10 +331,16 @@ public class SS7HAGatewayBootstrap {
                 logger.info("M3UA stopped");
             }
 
-            // Close Kafka producer
-            if (kafkaProducer != null) {
-                kafkaProducer.close();
-                logger.info("Kafka producer closed");
+            // Stop WorkerPool
+            if (workerPool != null) {
+                workerPool.stop();
+                logger.info("WorkerPool stopped");
+            }
+
+            // Close Event Publisher
+            if (eventPublisher != null) {
+                eventPublisher.close();
+                logger.info("Event publisher closed");
             }
 
             // Redis connection (Jedis) will be closed by GC
@@ -393,8 +373,12 @@ public class SS7HAGatewayBootstrap {
             System.exit(1);
         }
 
+        // Note: In production, create appropriate EventPublisher implementation
+        // For example: new KafkaEventPublisher(kafkaProducer)
+        EventPublisher eventPublisher = null;  // TODO: Create actual implementation
+
         // Create and start gateway
-        SS7HAGatewayBootstrap gateway = new SS7HAGatewayBootstrap(config);
+        SS7HAGatewayBootstrap gateway = new SS7HAGatewayBootstrap(config, eventPublisher);
 
         try {
             gateway.start();

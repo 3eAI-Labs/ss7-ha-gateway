@@ -15,9 +15,6 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  */
 public class MoSmsMessage extends SS7Message {
 
-    @JsonProperty("dialogId")
-    private Long dialogId;
-
     @JsonProperty("invokeId")
     private Integer invokeId;
 
@@ -162,14 +159,7 @@ public class MoSmsMessage extends SS7Message {
     }
 
     // Main class getters/setters
-
-    public Long getDialogId() {
-        return dialogId;
-    }
-
-    public void setDialogId(Long dialogId) {
-        this.dialogId = dialogId;
-    }
+    // Note: dialogId is inherited from SS7Message (String type)
 
     public Integer getInvokeId() {
         return invokeId;

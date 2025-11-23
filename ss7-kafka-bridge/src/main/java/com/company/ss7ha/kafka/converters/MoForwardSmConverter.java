@@ -1,16 +1,20 @@
 package com.company.ss7ha.kafka.converters;
 
 import com.company.ss7ha.kafka.messages.MoSmsMessage;
-import com.mobius.software.telco.protocols.ss7.map.api.primitives.AddressNature;
-import com.mobius.software.telco.protocols.ss7.map.api.primitives.AddressString;
-import com.mobius.software.telco.protocols.ss7.map.api.primitives.IMSI;
-import com.mobius.software.telco.protocols.ss7.map.api.primitives.ISDNAddressString;
-import com.mobius.software.telco.protocols.ss7.map.api.service.sms.MoForwardShortMessageRequest;
-import com.mobius.software.telco.protocols.ss7.map.api.service.sms.SmsSignalInfo;
-import com.mobius.software.telco.protocols.ss7.map.api.service.sms.LocationInfoWithLMSI;
+import org.restcomm.protocols.ss7.commonapp.api.primitives.AddressNature;
+import org.restcomm.protocols.ss7.commonapp.api.primitives.AddressString;
+import org.restcomm.protocols.ss7.commonapp.api.primitives.IMSI;
+import org.restcomm.protocols.ss7.commonapp.api.primitives.ISDNAddressString;
+import org.restcomm.protocols.ss7.map.api.service.sms.MoForwardShortMessageRequest;
+import org.restcomm.protocols.ss7.map.api.service.sms.SM_RP_OA;
+import org.restcomm.protocols.ss7.map.api.service.sms.SM_RP_DA;
+import org.restcomm.protocols.ss7.map.api.service.sms.SmsSignalInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.mobius.software.telco.protocols.ss7.asn.primitives.ASNOctetString;
+import io.netty.buffer.ByteBuf;
 
+import java.time.Instant;
 import java.util.Base64;
 import java.util.UUID;
 
@@ -53,38 +57,45 @@ public class MoForwardSmConverter {
 
             // Message metadata
             message.setMessageId(UUID.randomUUID().toString());
-            message.setTimestamp(System.currentTimeMillis());
-            message.setDialogId(dialogId);
+            message.setTimestamp(Instant.now());
+            message.setDialogId(dialogId != null ? dialogId.toString() : null);
             message.setInvokeId(invokeId);
 
-            // Sender information (MSISDN, IMSI)
-            if (request.getMsIsdn() != null) {
+            // Sender information (MSISDN from SM_RP_OA, IMSI)
+            SM_RP_OA rpOA = request.getSM_RP_OA();
+            if (rpOA != null && rpOA.getMsisdn() != null) {
                 MoSmsMessage.AddressInfo sender = new MoSmsMessage.AddressInfo();
-                sender.setMsisdn(extractAddress(request.getMsIsdn()));
+                sender.setMsisdn(extractAddress(rpOA.getMsisdn()));
 
-                // IMSI (if available)
-                if (request.getImsi() != null) {
-                    sender.setImsi(request.getImsi().getData());
+                // IMSI (if available - Corsac has getIMSI)
+                if (request.getIMSI() != null) {
+                    sender.setImsi(request.getIMSI().getData());
                 }
 
                 message.setSender(sender);
             }
 
-            // Service center address (recipient)
-            if (request.getSmRpDa() != null && request.getSmRpDa().getServiceCentreAddressDA() != null) {
+            // Service center address (recipient from SM_RP_DA)
+            SM_RP_DA rpDA = request.getSM_RP_DA();
+            if (rpDA != null && rpDA.getServiceCentreAddressDA() != null) {
                 MoSmsMessage.AddressInfo recipient = new MoSmsMessage.AddressInfo();
-                recipient.setAddress(extractAddress(request.getSmRpDa().getServiceCentreAddressDA()));
+                recipient.setMsisdn(extractAddress(rpDA.getServiceCentreAddressDA()));
                 message.setRecipient(recipient);
             }
 
-            // SMS content
-            if (request.getSmRpUi() != null) {
+            // SMS content (from SM_RP_UI)
+            if (request.getSM_RP_UI() != null) {
                 MoSmsMessage.MessageContent content = new MoSmsMessage.MessageContent();
 
-                // Base64 encode the SMS TPDU
-                byte[] tpdu = request.getSmRpUi().getValue();
-                if (tpdu != null) {
-                    content.setContent(Base64.getEncoder().encodeToString(tpdu));
+                // Base64 encode the SMS TPDU (Corsac uses ASNOctetString internally)
+                SmsSignalInfo smsSignalInfo = request.getSM_RP_UI();
+                if (smsSignalInfo instanceof ASNOctetString) {
+                    ByteBuf tpduBuf = ((ASNOctetString) smsSignalInfo).getValue();
+                    if (tpduBuf != null && tpduBuf.readableBytes() > 0) {
+                        byte[] tpdu = new byte[tpduBuf.readableBytes()];
+                        tpduBuf.getBytes(tpduBuf.readerIndex(), tpdu);
+                        content.setContent(Base64.getEncoder().encodeToString(tpdu));
+                    }
                 }
 
                 // Encoding type (will be decoded by consumer)
@@ -93,50 +104,13 @@ public class MoForwardSmConverter {
                 message.setMessage(content);
             }
 
-            // Network information
+            // Network information (simplified - Corsac doesn't have getStoredMSISDN/getLocationInfoWithLMSI)
             MoSmsMessage.NetworkInfo networkInfo = new MoSmsMessage.NetworkInfo();
-
-            // MSC address
-            if (request.getStoredMSISDN() != null) {
-                networkInfo.setMscAddress(extractAddress(request.getStoredMSISDN()));
-            }
-
-            // Location info (if available)
-            if (request.getLocationInfoWithLMSI() != null) {
-                LocationInfoWithLMSI locInfo = request.getLocationInfoWithLMSI();
-                MoSmsMessage.LocationInfo location = new MoSmsMessage.LocationInfo();
-
-                if (locInfo.getNetworkNodeNumber() != null) {
-                    networkInfo.setVlrNumber(extractAddress(locInfo.getNetworkNodeNumber()));
-                }
-
-                // Cell global identity (if available)
-                if (locInfo.getGprsNodeIndicator() != null) {
-                    // Extract MCC, MNC, LAC, Cell ID from CGI
-                    // Note: Actual extraction depends on GPRS node indicator structure
-                    // Simplified here - production code should parse properly
-                }
-
-                networkInfo.setLocationInfo(location);
-            }
-
             message.setNetworkInfo(networkInfo);
 
-            // Service information
+            // Service information (simplified - Corsac doesn't have getMoreMessagesToSend)
             MoSmsMessage.ServiceInfo serviceInfo = new MoSmsMessage.ServiceInfo();
-
-            // Priority (if available from message class)
-            if (request.getSmRpUi() != null) {
-                // Extract message class from TPDU (simplified)
-                // Production code should properly decode TPDU
-                serviceInfo.setPriority("NORMAL");
-            }
-
-            // More messages to send flag
-            if (request.getMoreMessagesToSend() != null) {
-                serviceInfo.setMoreMessagesToSend(request.getMoreMessagesToSend());
-            }
-
+            serviceInfo.setPriority("NORMAL");
             message.setServiceInfo(serviceInfo);
 
             logger.info("Converted MO-ForwardSM to JSON message: {} (dialog: {}, invoke: {})",
@@ -240,5 +214,41 @@ public class MoForwardSmConverter {
             logger.warn("Failed to decode UCS2 data", e);
             return null;
         }
+    }
+
+    /**
+     * Convert Map-based event to MoSmsMessage.
+     * This is used when events come from ss7-core's generic EventPublisher.
+     *
+     * @param eventData Map containing event data
+     * @return MoSmsMessage
+     */
+    public static MoSmsMessage convertFromMap(java.util.Map<String, Object> eventData) {
+        // TODO: Implement proper conversion from Map to MoSmsMessage
+        // For now, delegate to the full converter if we have the request object
+        Object request = eventData.get("request");
+        if (request instanceof MoForwardShortMessageRequest) {
+            Long dialogId = eventData.containsKey("dialogId") ?
+                          ((Number) eventData.get("dialogId")).longValue() : null;
+            Integer invokeId = eventData.containsKey("invokeId") ?
+                             ((Number) eventData.get("invokeId")).intValue() : null;
+
+            return convert((MoForwardShortMessageRequest) request, dialogId, invokeId);
+        }
+
+        // Fallback: create a minimal message from available data
+        logger.warn("Creating minimal MoSmsMessage from Map data (full request not available)");
+        MoSmsMessage message = new MoSmsMessage();
+        message.setMessageId(java.util.UUID.randomUUID().toString());
+        message.setTimestamp(Instant.now());
+
+        if (eventData.containsKey("dialogId")) {
+            message.setDialogId(String.valueOf(((Number) eventData.get("dialogId")).longValue()));
+        }
+        if (eventData.containsKey("invokeId")) {
+            message.setInvokeId(((Number) eventData.get("invokeId")).intValue());
+        }
+
+        return message;
     }
 }

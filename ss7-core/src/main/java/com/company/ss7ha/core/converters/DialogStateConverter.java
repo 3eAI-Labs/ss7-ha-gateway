@@ -2,22 +2,18 @@ package com.company.ss7ha.core.converters;
 
 import com.company.ss7ha.core.redis.model.DialogState;
 import com.company.ss7ha.core.redis.model.PendingInvoke;
-import com.mobius.software.telco.protocols.ss7.asn.ASNClass;
-import com.mobius.software.telco.protocols.ss7.asn.ASNParser;
-import com.mobius.software.telco.protocols.ss7.tcap.api.TCAPDialog;
-import com.mobius.software.telco.protocols.ss7.tcap.api.tc.dialog.Dialog;
-import com.mobius.software.telco.protocols.ss7.tcap.api.tc.dialog.events.TCBeginIndication;
-import com.mobius.software.telco.protocols.ss7.tcap.api.tc.dialog.events.TCContinueIndication;
+import org.restcomm.protocols.ss7.map.api.MAPDialog;
+import org.restcomm.protocols.ss7.sccp.parameter.SccpAddress;
+import org.restcomm.protocols.ss7.tcap.api.tc.dialog.Dialog;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
- * Converts JSS7 Dialog objects to license-safe DialogState.
+ * Converts Corsac JSS7 Dialog objects to license-safe DialogState.
  *
  * CRITICAL: This converter extracts ONLY primitive data from Dialog.
  * NO JSS7 objects are stored - this maintains the AGPL firewall!
@@ -32,7 +28,7 @@ public class DialogStateConverter {
     private static final Logger logger = LoggerFactory.getLogger(DialogStateConverter.class);
 
     /**
-     * Convert JSS7 Dialog to primitive DialogState.
+     * Convert Corsac JSS7 Dialog to primitive DialogState.
      *
      * This method extracts all essential dialog information as primitive types:
      * - Dialog IDs (local and remote)
@@ -41,7 +37,7 @@ public class DialogStateConverter {
      *
      * NO JSS7 objects are included in the result!
      *
-     * @param dialog JSS7 Dialog object
+     * @param dialog Corsac JSS7 Dialog object
      * @return DialogState with primitive types only
      */
     public static DialogState fromDialog(Dialog dialog) {
@@ -58,50 +54,44 @@ public class DialogStateConverter {
             state.setRemoteDialogId(dialog.getRemoteDialogId());
 
             // Dialog state
-            state.setState(dialog.getState() != null ? dialog.getState().toString() : "UNKNOWN");
+            if (dialog.getState() != null) {
+                state.setState(dialog.getState().toString());
+            } else {
+                state.setState("UNKNOWN");
+            }
             state.setCreatedAt(System.currentTimeMillis());
             state.setLastActivity(System.currentTimeMillis());
 
-            // Network ID (if available)
-            if (dialog.getNetworkId() != null) {
-                state.setNetworkId(dialog.getNetworkId());
-            }
+            // Network ID
+            state.setNetworkId(dialog.getNetworkId());
 
             // Local addressing
-            if (dialog.getLocalAddress() != null) {
-                if (dialog.getLocalAddress().getGlobalTitle() != null) {
-                    state.setLocalGT(dialog.getLocalAddress().getGlobalTitle().getDigits());
+            SccpAddress localAddress = dialog.getLocalAddress();
+            if (localAddress != null) {
+                if (localAddress.getGlobalTitle() != null) {
+                    state.setLocalGT(localAddress.getGlobalTitle().getDigits());
                 }
-                if (dialog.getLocalAddress().getSubsystemNumber() != null) {
-                    state.setLocalSSN(dialog.getLocalAddress().getSubsystemNumber());
-                }
-                if (dialog.getLocalAddress().getPointCode() != null) {
-                    state.setLocalPC(dialog.getLocalAddress().getPointCode());
-                }
+                state.setLocalSSN(localAddress.getSubsystemNumber());
+                state.setLocalPC(localAddress.getSignalingPointCode());
             }
 
             // Remote addressing
-            if (dialog.getRemoteAddress() != null) {
-                if (dialog.getRemoteAddress().getGlobalTitle() != null) {
-                    state.setRemoteGT(dialog.getRemoteAddress().getGlobalTitle().getDigits());
+            SccpAddress remoteAddress = dialog.getRemoteAddress();
+            if (remoteAddress != null) {
+                if (remoteAddress.getGlobalTitle() != null) {
+                    state.setRemoteGT(remoteAddress.getGlobalTitle().getDigits());
                 }
-                if (dialog.getRemoteAddress().getSubsystemNumber() != null) {
-                    state.setRemoteSSN(dialog.getRemoteAddress().getSubsystemNumber());
-                }
-                if (dialog.getRemoteAddress().getPointCode() != null) {
-                    state.setRemotePC(dialog.getRemoteAddress().getPointCode());
-                }
+                state.setRemoteSSN(remoteAddress.getSubsystemNumber());
+                state.setRemotePC(remoteAddress.getSignalingPointCode());
             }
 
-            // Application context (if available)
-            if (dialog.getApplicationContext() != null) {
-                state.setApplicationContextName(dialog.getApplicationContext().toString());
+            // Application context name
+            if (dialog.getApplicationContextName() != null) {
+                state.setApplicationContextName(dialog.getApplicationContextName().toString());
             }
 
             // Dialog timeout
-            if (dialog.getIdleTaskTimeout() != null) {
-                state.setDialogTimeout(dialog.getIdleTaskTimeout());
-            }
+            state.setDialogTimeout(dialog.getIdleTaskTimeout());
 
             // Initialize empty collections
             state.setPendingInvokes(new ArrayList<>());
@@ -122,13 +112,139 @@ public class DialogStateConverter {
     }
 
     /**
+     * Convert Corsac JSS7 MAPDialog to primitive DialogState.
+     *
+     * This is an overload for MAP-specific dialogs.
+     *
+     * @param mapDialog Corsac JSS7 MAPDialog object
+     * @return DialogState with primitive types only
+     */
+    public static DialogState fromDialog(MAPDialog mapDialog) {
+        if (mapDialog == null) {
+            logger.warn("Cannot convert null MAP dialog to DialogState");
+            return null;
+        }
+
+        try {
+            DialogState state = new DialogState();
+
+            // Basic dialog identifiers
+            state.setDialogId(mapDialog.getLocalDialogId());
+            state.setRemoteDialogId(mapDialog.getRemoteDialogId());
+
+            // Dialog state
+            if (mapDialog.getState() != null) {
+                state.setState(mapDialog.getState().toString());
+            } else {
+                state.setState("UNKNOWN");
+            }
+            state.setCreatedAt(System.currentTimeMillis());
+            state.setLastActivity(System.currentTimeMillis());
+
+            // Local addressing
+            SccpAddress localAddress = mapDialog.getLocalAddress();
+            if (localAddress != null) {
+                if (localAddress.getGlobalTitle() != null) {
+                    state.setLocalGT(localAddress.getGlobalTitle().getDigits());
+                }
+                state.setLocalSSN(localAddress.getSubsystemNumber());
+                state.setLocalPC(localAddress.getSignalingPointCode());
+            }
+
+            // Remote addressing
+            SccpAddress remoteAddress = mapDialog.getRemoteAddress();
+            if (remoteAddress != null) {
+                if (remoteAddress.getGlobalTitle() != null) {
+                    state.setRemoteGT(remoteAddress.getGlobalTitle().getDigits());
+                }
+                state.setRemoteSSN(remoteAddress.getSubsystemNumber());
+                state.setRemotePC(remoteAddress.getSignalingPointCode());
+            }
+
+            // Application context name
+            if (mapDialog.getApplicationContext() != null) {
+                state.setApplicationContextName(mapDialog.getApplicationContext().toString());
+            }
+
+            // Initialize empty collections
+            state.setPendingInvokes(new ArrayList<>());
+            state.setCustomData(new HashMap<>());
+
+            logger.debug("Converted MAP dialog {} to DialogState (GT: {} -> {})",
+                    state.getDialogId(),
+                    state.getLocalGT(),
+                    state.getRemoteGT());
+
+            return state;
+
+        } catch (Exception e) {
+            logger.error("Failed to convert MAP dialog {} to DialogState",
+                    mapDialog.getLocalDialogId(), e);
+            return null;
+        }
+    }
+
+    /**
+     * Update existing DialogState from MAPDialog.
+     *
+     * @param state Existing DialogState
+     * @param mapDialog Current Corsac JSS7 MAPDialog
+     * @return Updated DialogState
+     */
+    public static DialogState updateFromDialog(DialogState state, MAPDialog mapDialog) {
+        if (state == null || mapDialog == null) {
+            logger.warn("Cannot update DialogState - state or dialog is null");
+            return state;
+        }
+
+        try {
+            // Update state
+            if (mapDialog.getState() != null) {
+                state.setState(mapDialog.getState().toString());
+            }
+
+            // Update activity timestamp
+            state.setLastActivity(System.currentTimeMillis());
+
+            // Update remote dialog ID if now available
+            Long remoteDialogId = mapDialog.getRemoteDialogId();
+            if (remoteDialogId != null && state.getRemoteDialogId() == null) {
+                state.setRemoteDialogId(remoteDialogId);
+            }
+
+            // Update remote addressing if now available
+            SccpAddress remoteAddress = mapDialog.getRemoteAddress();
+            if (remoteAddress != null) {
+                if (remoteAddress.getGlobalTitle() != null && state.getRemoteGT() == null) {
+                    state.setRemoteGT(remoteAddress.getGlobalTitle().getDigits());
+                }
+                if (state.getRemoteSSN() == null) {
+                    state.setRemoteSSN(remoteAddress.getSubsystemNumber());
+                }
+                if (state.getRemotePC() == null) {
+                    state.setRemotePC(remoteAddress.getSignalingPointCode());
+                }
+            }
+
+            logger.debug("Updated DialogState for MAP dialog {}", state.getDialogId());
+
+            return state;
+
+        } catch (Exception e) {
+            logger.error("Failed to update DialogState from MAP dialog {}",
+                    mapDialog.getLocalDialogId(), e);
+            return state;
+        }
+    }
+
+    /**
      * Update existing DialogState from Dialog.
      *
      * This updates state, timing, and other dynamic fields while preserving
      * pending invokes and custom data.
      *
      * @param state Existing DialogState
-     * @param dialog Current JSS7 Dialog
+     * @param dialog Current Corsac JSS7 Dialog
      * @return Updated DialogState
      */
     public static DialogState updateFromDialog(DialogState state, Dialog dialog) {
@@ -147,20 +263,22 @@ public class DialogStateConverter {
             state.setLastActivity(System.currentTimeMillis());
 
             // Update remote dialog ID if now available
-            if (dialog.getRemoteDialogId() != null && state.getRemoteDialogId() == null) {
-                state.setRemoteDialogId(dialog.getRemoteDialogId());
+            Long remoteDialogId = dialog.getRemoteDialogId();
+            if (remoteDialogId != null && state.getRemoteDialogId() == null) {
+                state.setRemoteDialogId(remoteDialogId);
             }
 
             // Update remote addressing if now available
-            if (dialog.getRemoteAddress() != null) {
-                if (dialog.getRemoteAddress().getGlobalTitle() != null && state.getRemoteGT() == null) {
-                    state.setRemoteGT(dialog.getRemoteAddress().getGlobalTitle().getDigits());
+            SccpAddress remoteAddress = dialog.getRemoteAddress();
+            if (remoteAddress != null) {
+                if (remoteAddress.getGlobalTitle() != null && state.getRemoteGT() == null) {
+                    state.setRemoteGT(remoteAddress.getGlobalTitle().getDigits());
                 }
-                if (dialog.getRemoteAddress().getSubsystemNumber() != null && state.getRemoteSSN() == null) {
-                    state.setRemoteSSN(dialog.getRemoteAddress().getSubsystemNumber());
+                if (state.getRemoteSSN() == null) {
+                    state.setRemoteSSN(remoteAddress.getSubsystemNumber());
                 }
-                if (dialog.getRemoteAddress().getPointCode() != null && state.getRemotePC() == null) {
-                    state.setRemotePC(dialog.getRemoteAddress().getPointCode());
+                if (state.getRemotePC() == null) {
+                    state.setRemotePC(remoteAddress.getSignalingPointCode());
                 }
             }
 

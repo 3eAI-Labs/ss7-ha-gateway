@@ -153,8 +153,8 @@ public class SS7KafkaProducer {
         HealthCheckMessage health = new HealthCheckMessage();
         health.setNodeId(nodeId);
         health.setStatus(status);
-        health.setTimestamp(System.currentTimeMillis());
-        
+        health.setTimestamp(java.time.Instant.now());
+
         // Health check is a special type of SS7Message
         sendMessage(TOPIC_ADMIN_HEALTH, health);
     }
@@ -186,26 +186,24 @@ public class SS7KafkaProducer {
     public void close() {
         try {
             logger.info("Closing SS7 Kafka Producer");
-            producer.close(10, TimeUnit.SECONDS);
+            producer.close(java.time.Duration.ofSeconds(10));
         } catch (Exception e) {
             logger.error("Error closing Kafka producer", e);
         }
     }
-    
+
     /**
      * Health check message as a special SS7Message type
      */
     private static class HealthCheckMessage extends SS7Message {
         private String nodeId;
         private String status;
-        private long timestamp;
-        
+
         // Getters and setters
         public String getNodeId() { return nodeId; }
         public void setNodeId(String nodeId) { this.nodeId = nodeId; }
         public String getStatus() { return status; }
         public void setStatus(String status) { this.status = status; }
-        public long getTimestamp() { return timestamp; }
-        public void setTimestamp(long timestamp) { this.timestamp = timestamp; }
+        // Note: timestamp is inherited from SS7Message (Instant type)
     }
 }
