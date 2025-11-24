@@ -47,8 +47,8 @@ spec:
 
       containers:
       - name: ss7-ha-gateway
-        image: ss7-ha-gateway:latest
-        imagePullPolicy: IfNotPresent
+        image: registry.3eai-labs.com:32000/ss7-ha-gateway:1.0.31
+        imagePullPolicy: Always
 
         ports:
         - name: m3ua
