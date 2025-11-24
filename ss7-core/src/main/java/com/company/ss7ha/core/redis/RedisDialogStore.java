@@ -122,4 +122,9 @@ public interface RedisDialogStore {
      * @return Number of dialogs deleted
      */
     long clearAll();
+
+    /**
+     * Close the store connection.
+     */
+    void close();
 }

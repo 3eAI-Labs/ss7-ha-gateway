@@ -80,6 +80,13 @@
             <artifactId>jedis</artifactId>
         </dependency>
 
+        <!-- Kafka Client -->
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
+            <version>3.5.1</version>
+        </dependency>
+
         <!-- JSON Serialization (Apache-2.0 license - safe!) -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>

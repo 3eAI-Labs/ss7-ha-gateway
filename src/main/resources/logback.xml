@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <!-- Console appender -->
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- M3UA specific log file -->
+    <appender name="M3UA_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/m3ua.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/m3ua.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>7</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- SCCP/TCAP/MAP log file -->
+    <appender name="SS7_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/ss7.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/ss7.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>7</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- M3UA Logger - TRACE level to see all messages -->
+    <logger name="com.mobius.software.protocols.ss7.m3ua" level="TRACE" additivity="false">
+        <appender-ref ref="M3UA_FILE"/>
+        <appender-ref ref="STDOUT"/>
+    </logger>
+
+    <!-- SCCP Logger -->
+    <logger name="com.mobius.software.protocols.ss7.sccp" level="DEBUG" additivity="false">
+        <appender-ref ref="SS7_FILE"/>
+        <appender-ref ref="STDOUT"/>
+    </logger>
+
+    <!-- TCAP Logger -->
+    <logger name="com.mobius.software.protocols.ss7.tcap" level="DEBUG" additivity="false">
+        <appender-ref ref="SS7_FILE"/>
+        <appender-ref ref="STDOUT"/>
+    </logger>
+
+    <!-- MAP Logger -->
+    <logger name="com.mobius.software.protocols.ss7.map" level="DEBUG" additivity="false">
+        <appender-ref ref="SS7_FILE"/>
+        <appender-ref ref="STDOUT"/>
+    </logger>
+
+    <!-- Root logger -->
+    <logger name="com.company.ss7ha" level="INFO"/>
+    <root level="INFO">
+        <appender-ref ref="STDOUT"/>
+    </root>
+
+</configuration>
