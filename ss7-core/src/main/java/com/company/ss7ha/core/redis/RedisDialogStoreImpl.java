@@ -6,7 +6,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import redis.clients.jedis.JedisCluster;
+import redis.clients.jedis.UnifiedJedis;
 import redis.clients.jedis.params.SetParams;
 
 import java.util.*;
@@ -14,7 +14,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 /**
- * Redis Cluster implementation of DialogStore using Jedis client.
+ * Redis implementation of DialogStore using Jedis client.
+ * Supports both Standalone and Cluster modes via UnifiedJedis.
  *
  * This implementation uses Redis Hashes for dialog state storage,
  * providing efficient partial updates and TTL management.
@@ -28,7 +29,7 @@ public class RedisDialogStoreImpl implements RedisDialogStore {
 
     private static final Logger logger = LoggerFactory.getLogger(RedisDialogStoreImpl.class);
 
-    private final JedisCluster jedisCluster;
+    private final UnifiedJedis jedis;
     private final ObjectMapper objectMapper;
     private final int defaultTTL;  // seconds
 
@@ -49,20 +50,20 @@ public class RedisDialogStoreImpl implements RedisDialogStore {
     /**
      * Constructor with default TTL of 1 hour.
      *
-     * @param jedisCluster Redis cluster connection
+     * @param jedis Redis connection (UnifiedJedis)
      */
-    public RedisDialogStoreImpl(JedisCluster jedisCluster) {
-        this(jedisCluster, 3600);  // 1 hour default TTL
+    public RedisDialogStoreImpl(UnifiedJedis jedis) {
+        this(jedis, 3600);  // 1 hour default TTL
     }
 
     /**
      * Constructor with custom TTL.
      *
-     * @param jedisCluster Redis cluster connection
+     * @param jedis Redis connection (UnifiedJedis)
      * @param defaultTTL Default TTL in seconds
      */
-    public RedisDialogStoreImpl(JedisCluster jedisCluster, int defaultTTL) {
-        this.jedisCluster = jedisCluster;
+    public RedisDialogStoreImpl(UnifiedJedis jedis, int defaultTTL) {
+        this.jedis = jedis;
         this.objectMapper = new ObjectMapper();
         this.defaultTTL = defaultTTL;
 
@@ -83,16 +84,16 @@ public class RedisDialogStoreImpl implements RedisDialogStore {
             String json = objectMapper.writeValueAsString(state);
 
             // Store with TTL
-            String result = jedisCluster.setex(key, defaultTTL, json);
+            String result = jedis.setex(key, defaultTTL, json);
 
             // Add to active dialogs sorted set (score = timestamp)
-            jedisCluster.zadd(ACTIVE_DIALOGS_KEY, System.currentTimeMillis(),
+            jedis.zadd(ACTIVE_DIALOGS_KEY, System.currentTimeMillis(),
                              state.getDialogId().toString());
 
             // Add to network-specific set
             if (state.getNetworkId() != null) {
                 String networkKey = NETWORK_DIALOGS_PREFIX + state.getNetworkId();
-                jedisCluster.zadd(networkKey, System.currentTimeMillis(),
+                jedis.zadd(networkKey, System.currentTimeMillis(),
                                  state.getDialogId().toString());
             }
 
@@ -126,15 +127,15 @@ public class RedisDialogStoreImpl implements RedisDialogStore {
 
             // Serialize and store
             String json = objectMapper.writeValueAsString(state);
-            String result = jedisCluster.setex(key, defaultTTL, json);
+            String result = jedis.setex(key, defaultTTL, json);
 
             // Update score in sorted sets
-            jedisCluster.zadd(ACTIVE_DIALOGS_KEY, state.getLastActivity(),
+            jedis.zadd(ACTIVE_DIALOGS_KEY, state.getLastActivity(),
                              state.getDialogId().toString());
 
             if (state.getNetworkId() != null) {
                 String networkKey = NETWORK_DIALOGS_PREFIX + state.getNetworkId();
-                jedisCluster.zadd(networkKey, state.getLastActivity(),
+                jedis.zadd(networkKey, state.getLastActivity(),
                                  state.getDialogId().toString());
             }
 
@@ -162,7 +163,7 @@ public class RedisDialogStoreImpl implements RedisDialogStore {
 
         try {
             String key = getDialogKey(dialogId);
-            String json = jedisCluster.get(key);
+            String json = jedis.get(key);
 
             if (json == null) {
                 logger.debug("Dialog {} not found in Redis", dialogId);
@@ -197,13 +198,13 @@ public class RedisDialogStoreImpl implements RedisDialogStore {
             String invokesKey = getInvokesKey(dialogId);
 
             // Delete main state
-            jedisCluster.del(key);
+            jedis.del(key);
 
             // Delete invokes
-            jedisCluster.del(invokesKey);
+            jedis.del(invokesKey);
 
             // Remove from active dialogs set
-            jedisCluster.zrem(ACTIVE_DIALOGS_KEY, dialogId.toString());
+            jedis.zrem(ACTIVE_DIALOGS_KEY, dialogId.toString());
 
             // Remove from network sets (we don't know which network, so scan)
             // In production, consider maintaining reverse mapping
@@ -229,11 +230,11 @@ public class RedisDialogStoreImpl implements RedisDialogStore {
             String key = getDialogKey(dialogId);
 
             // Refresh TTL
-            Long result = jedisCluster.expire(key, defaultTTL);
+            Long result = jedis.expire(key, defaultTTL);
 
             // Update score in sorted set
             long now = System.currentTimeMillis();
-            jedisCluster.zadd(ACTIVE_DIALOGS_KEY, now, dialogId.toString());
+            jedis.zadd(ACTIVE_DIALOGS_KEY, now, dialogId.toString());
 
             return result != null && result == 1;
 
@@ -258,10 +259,10 @@ public class RedisDialogStoreImpl implements RedisDialogStore {
             String json = objectMapper.writeValueAsString(invoke);
 
             // Store as hash field
-            jedisCluster.hset(key, invokeId.toString(), json);
+            jedis.hset(key, invokeId.toString(), json);
 
             // Set TTL on hash
-            jedisCluster.expire(key, defaultTTL);
+            jedis.expire(key, defaultTTL);
 
             logger.trace("Stored pending invoke {} for dialog {}", invokeId, dialogId);
             return true;
@@ -287,7 +288,7 @@ public class RedisDialogStoreImpl implements RedisDialogStore {
 
         try {
             String key = getInvokesKey(dialogId);
-            Long result = jedisCluster.hdel(key, invokeId.toString());
+            Long result = jedis.hdel(key, invokeId.toString());
 
             logger.trace("Removed pending invoke {} for dialog {}", invokeId, dialogId);
             return result != null && result == 1;
@@ -307,10 +308,10 @@ public class RedisDialogStoreImpl implements RedisDialogStore {
 
             if (limit > 0) {
                 // Get most recent N dialogs
-                dialogIds = jedisCluster.zrevrange(ACTIVE_DIALOGS_KEY, 0, limit - 1);
+                dialogIds = jedis.zrevrange(ACTIVE_DIALOGS_KEY, 0, limit - 1);
             } else {
                 // Get all dialogs
-                dialogIds = jedisCluster.zrange(ACTIVE_DIALOGS_KEY, 0, -1);
+                dialogIds = jedis.zrange(ACTIVE_DIALOGS_KEY, 0, -1);
             }
 
             return dialogIds.stream()
@@ -331,9 +332,9 @@ public class RedisDialogStoreImpl implements RedisDialogStore {
             List<String> dialogIds;
 
             if (limit > 0) {
-                dialogIds = jedisCluster.zrevrange(networkKey, 0, limit - 1);
+                dialogIds = jedis.zrevrange(networkKey, 0, limit - 1);
             } else {
-                dialogIds = jedisCluster.zrange(networkKey, 0, -1);
+                dialogIds = jedis.zrange(networkKey, 0, -1);
             }
 
             return dialogIds.stream()
@@ -359,7 +360,7 @@ public class RedisDialogStoreImpl implements RedisDialogStore {
 
         try {
             // Get active dialog count
-            Long activeCount = jedisCluster.zcard(ACTIVE_DIALOGS_KEY);
+            Long activeCount = jedis.zcard(ACTIVE_DIALOGS_KEY);
             stats.put("active_dialogs", activeCount != null ? activeCount : 0L);
         } catch (Exception e) {
             logger.warn("Failed to get active dialog count", e);
@@ -373,7 +374,7 @@ public class RedisDialogStoreImpl implements RedisDialogStore {
     public boolean isHealthy() {
         try {
             // Simple ping test
-            String pong = jedisCluster.ping();
+            String pong = jedis.ping();
             return "PONG".equals(pong);
         } catch (Exception e) {
             logger.error("Redis health check failed", e);
@@ -398,7 +399,7 @@ public class RedisDialogStoreImpl implements RedisDialogStore {
             }
 
             // Clear sorted sets
-            jedisCluster.del(ACTIVE_DIALOGS_KEY);
+            jedis.del(ACTIVE_DIALOGS_KEY);
 
             logger.warn("Cleared {} dialogs from Redis", count);
             return count;
@@ -429,7 +430,9 @@ public class RedisDialogStoreImpl implements RedisDialogStore {
      */
     public void close() {
         try {
-            jedisCluster.close();
+            if (jedis instanceof AutoCloseable) {
+                ((AutoCloseable) jedis).close();
+            }
             logger.info("RedisDialogStore closed");
         } catch (Exception e) {
             logger.error("Error closing Redis connection", e);

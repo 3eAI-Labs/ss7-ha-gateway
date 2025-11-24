@@ -6,6 +6,7 @@ import com.company.ss7ha.core.redis.RedisDialogStore;
 import com.company.ss7ha.core.redis.RedisDialogStoreImpl;
 import com.mobius.software.common.dal.timers.WorkerPool;
 import com.mobius.software.telco.protocols.ss7.common.UUIDGenerator;
+import org.restcomm.protocols.sctp.SctpManagementImpl;
 import org.restcomm.protocols.ss7.m3ua.M3UAManagement;
 import org.restcomm.protocols.ss7.m3ua.impl.M3UAManagementImpl;
 import org.restcomm.protocols.ss7.map.api.MAPProvider;
@@ -19,6 +20,8 @@ import org.restcomm.protocols.ss7.tcap.api.TCAPStack;
 import org.restcomm.protocols.ss7.tcap.TCAPStackImpl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import redis.clients.jedis.UnifiedJedis;
+import redis.clients.jedis.JedisPooled;
 import redis.clients.jedis.JedisCluster;
 import redis.clients.jedis.HostAndPort;
 
@@ -55,7 +58,8 @@ public class SS7HAGatewayBootstrap {
     // SS7 Stack components
     private WorkerPool workerPool;
     private UUIDGenerator uuidGenerator;
-    private M3UAManagement m3uaManagement;
+    private SctpManagementImpl sctpManagement;
+    private M3UAManagementImpl m3uaManagement;
     private SccpStack sccpStack;
     private TCAPStack tcapStack;
     private MAPStackImpl mapStack;
@@ -135,24 +139,41 @@ public class SS7HAGatewayBootstrap {
         logger.info("Initializing Redis dialog store...");
 
         try {
-            // Parse Redis cluster nodes from config
-            String redisNodes = config.getProperty("redis.cluster.nodes",
-                    "localhost:7000,localhost:7001,localhost:7002");
+            // Parse Redis nodes from config (check System property first)
+            String redisNodes = System.getProperty("redis.cluster.nodes", 
+                config.getProperty("redis.cluster.nodes", "localhost:6379"));
+            
+            String ttlStr = System.getProperty("redis.dialog.ttl", 
+                config.getProperty("redis.dialog.ttl", "3600"));
+            int dialogTTL = Integer.parseInt(ttlStr);
 
-            Set<HostAndPort> clusterNodes = new HashSet<>();
-            for (String node : redisNodes.split(",")) {
-                String[] parts = node.trim().split(":");
+            String[] nodes = redisNodes.split(",");
+            UnifiedJedis jedisClient;
+
+            if (nodes.length == 1) {
+                // Single node -> Use JedisPooled (Standalone)
+                String[] parts = nodes[0].trim().split(":");
                 String host = parts[0];
                 int port = parts.length > 1 ? Integer.parseInt(parts[1]) : 6379;
-                clusterNodes.add(new HostAndPort(host, port));
+                
+                logger.info("Initializing Redis in Standalone mode: {}:{}", host, port);
+                jedisClient = new JedisPooled(host, port);
+            } else {
+                // Multiple nodes -> Use JedisCluster
+                Set<HostAndPort> clusterNodes = new HashSet<>();
+                for (String node : nodes) {
+                    String[] parts = node.trim().split(":");
+                    String host = parts[0];
+                    int port = parts.length > 1 ? Integer.parseInt(parts[1]) : 6379;
+                    clusterNodes.add(new HostAndPort(host, port));
+                }
+                
+                logger.info("Initializing Redis in Cluster mode with {} nodes", clusterNodes.size());
+                jedisClient = new JedisCluster(clusterNodes);
             }
 
-            // Create Jedis cluster
-            JedisCluster jedisCluster = new JedisCluster(clusterNodes);
-
             // Create dialog store
-            int dialogTTL = Integer.parseInt(config.getProperty("redis.dialog.ttl", "3600"));
-            dialogStore = new RedisDialogStoreImpl(jedisCluster, dialogTTL);
+            dialogStore = new RedisDialogStoreImpl(jedisClient, dialogTTL);
 
             // Health check
             if (dialogStore.isHealthy()) {
@@ -176,8 +197,14 @@ public class SS7HAGatewayBootstrap {
         try {
             String m3uaName = config.getProperty("m3ua.name", "M3UA-STACK");
 
+            // Use the 4-arg constructor found in GatewayTest
+            sctpManagement = new SctpManagementImpl("SCTP-" + m3uaName, 4, 4, 4);
+            // sctpManagement.setSingleThread(true); // Removed
+            // sctpManagement.setConnectDelay(10000); // Removed
+            
             // Corsac API: M3UAManagementImpl(name, persistDir, uuidGenerator, workerPool)
             m3uaManagement = new M3UAManagementImpl(m3uaName, null, uuidGenerator, workerPool);
+            m3uaManagement.setTransportManagement(sctpManagement);
 
             // Configure M3UA (simplified - production needs full config)
             // - Add SCTP associations
@@ -291,6 +318,11 @@ public class SS7HAGatewayBootstrap {
 
         try {
             // Start in correct order (bottom-up)
+            if (sctpManagement != null) {
+                sctpManagement.start();
+                logger.info("SCTP started");
+            }
+
             m3uaManagement.start();
             logger.info("M3UA started");
 
@@ -329,6 +361,11 @@ public class SS7HAGatewayBootstrap {
             if (m3uaManagement != null) {
                 m3uaManagement.stop();
                 logger.info("M3UA stopped");
+            }
+
+            if (sctpManagement != null) {
+                sctpManagement.stop();
+                logger.info("SCTP stopped");
             }
 
             // Stop WorkerPool
