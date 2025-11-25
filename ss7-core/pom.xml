@@ -80,11 +80,11 @@
             <artifactId>jedis</artifactId>
         </dependency>
 
-        <!-- Kafka Client -->
+        <!-- Internal modules -->
         <dependency>
-            <groupId>org.apache.kafka</groupId>
-            <artifactId>kafka-clients</artifactId>
-            <version>3.5.1</version>
+            <groupId>com.company.ss7ha</groupId>
+            <artifactId>ss7-nats-bridge</artifactId>
+            <version>${project.version}</version>
         </dependency>
 
         <!-- JSON Serialization (Apache-2.0 license - safe!) -->
