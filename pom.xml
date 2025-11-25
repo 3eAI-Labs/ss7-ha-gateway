@@ -28,6 +28,9 @@
         <!-- Kafka version -->
         <kafka.version>3.5.1</kafka.version>
 
+        <!-- NATS version -->
+        <nats.version>2.17.2</nats.version>
+
         <!-- Redis version -->
         <jedis.version>5.0.2</jedis.version>
 
@@ -43,6 +46,7 @@
     <modules>
         <module>ss7-core</module>
         <module>ss7-kafka-bridge</module>
+        <module>ss7-nats-bridge</module>
         <module>ss7-ha-manager</module>
     </modules>
 
@@ -136,7 +140,14 @@
                 <artifactId>kafka-streams</artifactId>
                 <version>${kafka.version}</version>
             </dependency>
-            
+
+            <!-- NATS Dependencies (Apache-2.0) -->
+            <dependency>
+                <groupId>io.nats</groupId>
+                <artifactId>jnats</artifactId>
+                <version>${nats.version}</version>
+            </dependency>
+
             <!-- JSON Processing -->
             <dependency>
                 <groupId>com.fasterxml.jackson.core</groupId>

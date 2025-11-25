@@ -49,7 +49,7 @@ public class SS7KafkaProducer {
         props.putIfAbsent(ProducerConfig.BATCH_SIZE_CONFIG, 16384);
         props.putIfAbsent(ProducerConfig.LINGER_MS_CONFIG, 10);
         props.putIfAbsent(ProducerConfig.BUFFER_MEMORY_CONFIG, 33554432);
-        props.putIfAbsent(ProducerConfig.COMPRESSION_TYPE_CONFIG, "snappy");
+        props.putIfAbsent(ProducerConfig.COMPRESSION_TYPE_CONFIG, "none");
         props.putIfAbsent(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
         props.putIfAbsent(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
         
