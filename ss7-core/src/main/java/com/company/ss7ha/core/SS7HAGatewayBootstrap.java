@@ -1,10 +1,14 @@
 package com.company.ss7ha.core;
 
 import com.company.ss7ha.core.events.EventPublisher;
-import com.company.ss7ha.core.kafka.SS7KafkaConsumer;
 import com.company.ss7ha.core.listeners.MapSmsServiceListener;
 import com.company.ss7ha.core.redis.RedisDialogStore;
 import com.company.ss7ha.core.redis.RedisDialogStoreImpl;
+import com.company.ss7ha.nats.publisher.SS7NatsPublisher;
+import com.company.ss7ha.nats.subscriber.SS7NatsSubscriber;
+import com.company.ss7ha.messages.MapSmsMessage;
+import com.company.ss7ha.messages.MapSmsMessage.SmsType;
+import java.time.Instant;
 import com.mobius.software.common.dal.timers.WorkerPool;
 import com.mobius.software.telco.protocols.ss7.common.UUIDGenerator;
 import org.restcomm.protocols.sctp.SctpManagementImpl;
@@ -51,7 +55,8 @@ public class SS7HAGatewayBootstrap {
     private RedisDialogStore dialogStore;
     private EventPublisher eventPublisher;
     private MapSmsServiceListener smsServiceListener;
-    private SS7KafkaConsumer kafkaConsumer;
+    private SS7NatsPublisher natsPublisher;
+    private SS7NatsSubscriber natsSubscriber;
 
     // Configuration
     private final Properties config;
@@ -71,7 +76,7 @@ public class SS7HAGatewayBootstrap {
             initializeSCCP();
             initializeMAP();
             registerMapListeners();
-            initializeKafkaConsumer();
+            initializeNats();
             startComponents();
 
             logger.info("SS7 HA Gateway started successfully");
@@ -194,21 +199,50 @@ public class SS7HAGatewayBootstrap {
         }
     }
 
-    private void initializeKafkaConsumer() {
-        logger.info("Initializing Kafka Consumer...");
+    private void initializeNats() {
+        logger.info("Initializing NATS...");
         try {
-            Properties kafkaProps = new Properties();
-            // Pass all config properties + override with system property for bootstrap
-            kafkaProps.putAll(config);
-            String bootstrap = System.getProperty("kafka.bootstrap.servers", 
-                config.getProperty("kafka.bootstrap.servers", "kafka-0.kafka.kafka.svc.cluster.local:9092"));
-            kafkaProps.put("kafka.bootstrap.servers", bootstrap);
-            
-            kafkaConsumer = new SS7KafkaConsumer(kafkaProps);
-            logger.info("Kafka Consumer initialized");
+            // Get NATS configuration from system properties or config file
+            String natsUrl = System.getProperty("nats.server.url",
+                config.getProperty("nats.server.url", "nats://localhost:4222"));
+            String queueGroup = System.getProperty("nats.queue.group",
+                config.getProperty("nats.queue.group", "ss7-gateway-group-v2"));
+
+            // Initialize NATS publisher first
+            natsPublisher = new SS7NatsPublisher(natsUrl);
+            natsPublisher.start();
+            logger.info("NATS Publisher initialized and connected");
+
+            // Initialize NATS subscriber with loopback handler
+            natsSubscriber = new SS7NatsSubscriber(natsUrl, queueGroup);
+
+            // Register MT SMS handler with loopback logic
+            natsSubscriber.setMtSmsHandler(mtSmsMessage -> {
+                logger.info("Processing MT SMS request: {} from {} to {}",
+                    mtSmsMessage.getMessageId(),
+                    mtSmsMessage.getSender(),
+                    mtSmsMessage.getRecipient());
+
+                // Create loopback MO SMS response (swap sender/recipient)
+                MapSmsMessage moMessage = new MapSmsMessage();
+                moMessage.setMessageId(mtSmsMessage.getMessageId() + "_MO");
+                moMessage.setCorrelationId(mtSmsMessage.getMessageId());
+                moMessage.setSender(mtSmsMessage.getRecipient());   // Swap
+                moMessage.setRecipient(mtSmsMessage.getSender());   // Swap
+                moMessage.setContent("Echo: " + mtSmsMessage.getContent());
+                moMessage.setSmsType(SmsType.MO_FORWARD_SM);
+                moMessage.setTimestamp(Instant.now());
+
+                // Publish loopback MO SMS
+                natsPublisher.publishMoSmsResponse(moMessage);
+                logger.info("Loopback MO SMS sent (from {} to {})",
+                    moMessage.getSender(), moMessage.getRecipient());
+            });
+
+            logger.info("NATS Subscriber initialized with loopback handler");
         } catch (Exception e) {
-            logger.error("Failed to initialize Kafka Consumer", e);
-            // Don't fail startup if Kafka is down, just log
+            logger.error("Failed to initialize NATS", e);
+            throw new RuntimeException("NATS initialization failed", e);
         }
     }
 
@@ -225,12 +259,12 @@ public class SS7HAGatewayBootstrap {
             logger.info("SCCP started");
             mapStack.start();
             logger.info("MAP started (TCAP started internally)");
-            
-            if (kafkaConsumer != null) {
-                new Thread(kafkaConsumer, "SS7KafkaConsumer").start();
-                logger.info("Kafka Consumer started");
+
+            if (natsSubscriber != null) {
+                natsSubscriber.start();
+                logger.info("NATS Subscriber started");
             }
-            
+
             logger.info("All SS7 stack components started successfully");
         } catch (Exception e) {
             logger.error("Failed to start SS7 components", e);
@@ -241,7 +275,8 @@ public class SS7HAGatewayBootstrap {
     public void stop() {
         logger.info("Stopping SS7 HA Gateway...");
         try {
-            if (kafkaConsumer != null) kafkaConsumer.stop();
+            if (natsSubscriber != null) natsSubscriber.stop();
+            if (natsPublisher != null) natsPublisher.stop();
             if (mapStack != null) mapStack.stop();
             if (sccpStack != null) sccpStack.stop();
             if (m3uaManagement != null) m3uaManagement.stop();

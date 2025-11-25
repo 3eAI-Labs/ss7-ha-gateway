@@ -25,6 +25,7 @@ ENV SCTP_LOCAL_PORT="2905"
 ENV SCTP_REMOTE_HOST="ss7-ha-gw-2.ss7.svc.cluster.local"
 ENV SCTP_REMOTE_PORT="2905"
 ENV M3UA_ROUTING_CONTEXT="100"
+ENV NATS_URL="nats://nats.nats.svc.cluster.local:4222"
 
 EXPOSE 2905
 
@@ -37,4 +38,5 @@ CMD java $JAVA_OPTS \
     -Dsctp.remote.host=$SCTP_REMOTE_HOST \
     -Dsctp.remote.port=$SCTP_REMOTE_PORT \
     -Dm3ua.routing.context=$M3UA_ROUTING_CONTEXT \
+    -Dnats.server.url=$NATS_URL \
     -jar /app/ss7-ha-gateway.jar
