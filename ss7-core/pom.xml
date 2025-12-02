@@ -74,19 +74,6 @@
             <artifactId>mobius-timers</artifactId>
         </dependency>
 
-        <!-- Redis Client (Apache-2.0 license - safe!) -->
-        <dependency>
-            <groupId>redis.clients</groupId>
-            <artifactId>jedis</artifactId>
-        </dependency>
-
-        <!-- Kafka Client -->
-        <dependency>
-            <groupId>org.apache.kafka</groupId>
-            <artifactId>kafka-clients</artifactId>
-            <version>3.5.1</version>
-        </dependency>
-
         <!-- JSON Serialization (Apache-2.0 license - safe!) -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
@@ -97,6 +84,12 @@
             <artifactId>jackson-datatype-jsr310</artifactId>
         </dependency>
 
+        <!-- NATS Client for JetStream KV Store (Apache-2.0) -->
+        <dependency>
+            <groupId>io.nats</groupId>
+            <artifactId>jnats</artifactId>
+        </dependency>
+
         <!-- Utilities -->
         <dependency>
             <groupId>org.apache.commons</groupId>
@@ -105,6 +98,13 @@
         <dependency>
             <groupId>com.google.guava</groupId>
             <artifactId>guava</artifactId>
+        </dependency>
+
+        <!-- NATS Bridge -->
+        <dependency>
+            <groupId>com.company.ss7ha</groupId>
+            <artifactId>ss7-nats-bridge</artifactId>
+            <version>${project.version}</version>
         </dependency>
 
         <!-- Logging -->

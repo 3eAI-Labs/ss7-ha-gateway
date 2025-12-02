@@ -4,7 +4,7 @@
 [![Java](https://img.shields.io/badge/Java-8%2B-orange.svg)](https://www.oracle.com/java/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-High Availability SS7 Protocol Gateway with distributed state management and event-driven architecture.
+High Availability SS7 Protocol Gateway with NATS-based messaging and event-driven architecture.
 
 **Developed by [3eAI Labs](https://github.com/3eAI-labs)**
 
@@ -14,10 +14,10 @@ High Availability SS7 Protocol Gateway with distributed state management and eve
 
 SS7 HA Gateway is an open-source, carrier-grade protocol handling layer for SS7/MAP/CAP networks. It provides:
 
-- **High Availability**: Redis-based distributed state management
-- **Horizontal Scalability**: Multiple gateway instances with automatic failover
-- **Event-Driven Architecture**: Clean JSON events published to Kafka
-- **Zero Message Loss**: Sub-15-second failover with full dialog recovery
+- **Pure NATS Architecture**: NATS JetStream for messaging and optional dialog state persistence
+- **Horizontal Scalability**: Multiple gateway instances with NATS queue groups
+- **Event-Driven Architecture**: Clean JSON events published to NATS subjects
+- **Stateless Operation**: Optimized for high throughput with optional persistence
 - **Production Ready**: Battle-tested components with comprehensive monitoring
 
 ### Architecture
@@ -36,21 +36,23 @@ SS7 HA Gateway is an open-source, carrier-grade protocol handling layer for SS7/
          │  • Dialog Management │
          └──────┬───────────────┘
                 │
-    ┌───────────┼───────────┐
-    │           │           │
-┌───▼───┐   ┌──▼───┐   ┌──▼────┐
-│ Redis │   │ Kafka│   │Gateway│
-│Cluster│   │      │   │ Nodes │
-└───────┘   └──┬───┘   └───────┘
-               │
-               │ JSON Events
-               │
-        ┌──────▼────────┐
-        │   Your Apps   │
-        │  • SMSC       │
-        │  • IN/CAMEL   │
-        │  • USSD       │
-        └───────────────┘
+                │ NATS Messaging
+                │
+        ┌───────▼────────┐
+        │  NATS Server   │
+        │  • JetStream   │
+        │  • Pub/Sub     │
+        │  • Queue Groups│
+        └───────┬────────┘
+                │
+                │ JSON Events
+                │
+        ┌───────▼────────┐
+        │   Your Apps    │
+        │  • SMSC        │
+        │  • IN/CAMEL    │
+        │  • USSD        │
+        └────────────────┘
 ```
 
 ---
@@ -65,16 +67,16 @@ SS7 HA Gateway is an open-source, carrier-grade protocol handling layer for SS7/
 - **CAP** - CAMEL Application Part (IN services)
 
 ### High Availability
-- **Redis Cluster Integration**: Shared dialog state across instances
-- **Automatic Failover**: Kafka consumer group rebalancing
-- **Dialog Recovery**: Full state restoration on instance failure
-- **Zero Downtime Updates**: Rolling deployments supported
+- **NATS Queue Groups**: Automatic load balancing across gateway instances
+- **Stateless Design**: Fast horizontal scaling without state synchronization
+- **Optional Persistence**: NATS JetStream KV for dialog state (can be enabled)
+- **Zero Downtime Updates**: Rolling deployments with instant rebalancing
 
 ### Event-Driven Integration
-- **Kafka Producer**: Publishes MAP/CAP events as JSON
+- **NATS Publisher**: Publishes MAP/CAP events as JSON to NATS subjects
 - **Clean API**: No SS7 stack dependencies for consumers
 - **Standard Format**: JSON schema with versioning support
-- **Language Agnostic**: Any language can consume events
+- **Language Agnostic**: Any language can subscribe to NATS subjects
 
 ### Monitoring & Operations
 - **Prometheus Metrics**: Dialog counts, throughput, latency
@@ -90,8 +92,7 @@ SS7 HA Gateway is an open-source, carrier-grade protocol handling layer for SS7/
 
 - Java 8 or higher
 - Maven 3.6+
-- Redis Cluster (6 nodes recommended)
-- Kafka Cluster (3 brokers minimum)
+- NATS Server with JetStream enabled
 - Docker (optional, for containerized deployment)
 
 ### Build from Source
@@ -107,15 +108,10 @@ mvn clean install
 Create `config/ss7-ha-gateway.properties`:
 
 ```properties
-# Redis Configuration
-redis.cluster.nodes=redis1:6379,redis2:6379,redis3:6379
-redis.dialog.ttl=3600
-redis.persist.dialogs=true
-
-# Kafka Configuration
-kafka.bootstrap.servers=kafka1:9092,kafka2:9092,kafka3:9092
-kafka.topic.prefix=ss7.
-kafka.publish.enabled=true
+# NATS Configuration
+nats.server.url=nats://localhost:4222
+nats.queue.group=ss7-gateway-group
+events.publish.enabled=true
 
 # M3UA Configuration
 m3ua.sctp.server.host=0.0.0.0
@@ -129,6 +125,12 @@ sccp.local.gt=123456789
 # TCAP Configuration
 tcap.dialog.idle.timeout=60000
 tcap.max.dialogs=5000
+
+# Stack Configuration
+stack.name=SS7-HA-Gateway
+m3ua.name=M3UA-STACK
+sccp.name=SCCP-STACK
+map.name=MAP-STACK
 ```
 
 ### Run
@@ -173,7 +175,7 @@ See [docs/PHASE_4_TESTING_DEPLOYMENT.md](docs/PHASE_4_TESTING_DEPLOYMENT.md) for
 
 ## Example: Consuming MO-SMS Events
 
-Your application receives JSON events from Kafka:
+Your application receives JSON events from NATS:
 
 ```json
 {
@@ -197,20 +199,27 @@ Your application receives JSON events from Kafka:
 Process with any language:
 
 ```java
-// Java example
-@KafkaListener(topics = "ss7.sms.mo.incoming")
-public void handleMoSms(String json) {
-    MoSmsMessage msg = objectMapper.readValue(json, MoSmsMessage.class);
+// Java example with NATS
+Connection nc = Nats.connect("nats://localhost:4222");
+Dispatcher dispatcher = nc.createDispatcher();
+dispatcher.subscribe("map.sms.mo", msg -> {
+    String json = new String(msg.getData(), StandardCharsets.UTF_8);
+    MoSmsMessage sms = objectMapper.readValue(json, MoSmsMessage.class);
     // Your business logic here
-}
+});
 ```
 
 ```python
-# Python example
-consumer = KafkaConsumer('ss7.sms.mo.incoming')
-for message in consumer:
-    msg = json.loads(message.value)
+# Python example with NATS
+import nats
+import json
+
+async def message_handler(msg):
+    data = json.loads(msg.data.decode())
     # Your business logic here
+
+nc = await nats.connect("nats://localhost:4222")
+await nc.subscribe("map.sms.mo", cb=message_handler)
 ```
 
 ---
@@ -218,8 +227,7 @@ for message in consumer:
 ## Technology Stack
 
 - **[Corsac JSS7](https://github.com/mobius-software-ltd/corsac-jss7)** - SS7 protocol implementation (AGPL-3.0)
-- **[Apache Kafka](https://kafka.apache.org/)** - Event streaming platform
-- **[Redis](https://redis.io/)** - Distributed state storage
+- **[NATS](https://nats.io/)** - Cloud-native messaging system (Apache-2.0)
 - **[Jackson](https://github.com/FasterXML/jackson)** - JSON processing
 - **[Prometheus](https://prometheus.io/)** - Metrics and monitoring
 

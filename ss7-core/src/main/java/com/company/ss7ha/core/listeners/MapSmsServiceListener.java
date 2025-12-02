@@ -1,9 +1,8 @@
 package com.company.ss7ha.core.listeners;
 
-import com.company.ss7ha.core.converters.DialogStateConverter;
 import com.company.ss7ha.core.events.EventPublisher;
-import com.company.ss7ha.core.redis.RedisDialogStore;
-import com.company.ss7ha.core.redis.model.DialogState;
+import com.company.ss7ha.core.model.DialogState;
+import com.company.ss7ha.core.store.DialogStore;
 import org.restcomm.protocols.ss7.map.api.MAPDialog;
 import org.restcomm.protocols.ss7.map.api.MAPMessage;
 import org.restcomm.protocols.ss7.map.api.service.sms.MAPDialogSms;
@@ -19,17 +18,17 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * MAP SMS Service Listener with Redis persistence and Kafka integration.
+ * MAP SMS Service Listener with NATS persistence and event integration.
  *
  * This listener:
  * 1. Receives MAP SMS operations (MO-ForwardSM, MT-ForwardSM, SRI-SM)
- * 2. Stores dialog state in Redis for failover
- * 3. Converts to JSON and publishes to Kafka
+ * 2. Optionally stores dialog state in NATS JetStream KV for failover
+ * 3. Publishes events to NATS
  *
  * CRITICAL: This maintains the AGPL firewall by:
- * - Extracting primitive data to DialogState (Redis)
- * - Converting to JSON messages (Kafka)
- * - NO JSS7 objects cross the Kafka boundary!
+ * - Extracting primitive data to DialogState (NATS KV)
+ * - Converting to JSON messages (NATS)
+ * - NO JSS7 objects cross the NATS boundary!
  *
  * LICENSE: AGPL-3.0 (part of ss7-ha-gateway)
  *
@@ -40,36 +39,32 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
 
     private static final Logger logger = LoggerFactory.getLogger(MapSmsServiceListener.class);
 
-    private final RedisDialogStore dialogStore;
+    private final DialogStore dialogStore;
     private final EventPublisher eventPublisher;
 
     // Configuration
     private final boolean persistDialogs;
-    private final boolean publishToKafka;
-    private final int dialogTTL;
+    private final boolean publishEvents;
 
     /**
-     * Constructor with Redis and Event Publisher integration.
+     * Constructor with Dialog Store and Event Publisher integration.
      *
-     * @param dialogStore Redis dialog store
-     * @param eventPublisher Event publisher (Kafka, gRPC, etc.)
+     * @param dialogStore Dialog store (NATS KV, in-memory, etc.) - can be null for stateless mode
+     * @param eventPublisher Event publisher (NATS, gRPC, etc.)
      * @param persistDialogs Enable dialog persistence
-     * @param publishToKafka Enable event publishing
-     * @param dialogTTL Dialog TTL in seconds
+     * @param publishEvents Enable event publishing
      */
-    public MapSmsServiceListener(RedisDialogStore dialogStore,
+    public MapSmsServiceListener(DialogStore dialogStore,
                                  EventPublisher eventPublisher,
                                  boolean persistDialogs,
-                                 boolean publishToKafka,
-                                 int dialogTTL) {
+                                 boolean publishEvents) {
         this.dialogStore = dialogStore;
         this.eventPublisher = eventPublisher;
-        this.persistDialogs = persistDialogs;
-        this.publishToKafka = publishToKafka;
-        this.dialogTTL = dialogTTL;
+        this.persistDialogs = persistDialogs && (dialogStore != null);
+        this.publishEvents = publishEvents;
 
-        logger.info("MapSmsServiceListener initialized (persist: {}, kafka: {}, TTL: {}s)",
-                persistDialogs, publishToKafka, dialogTTL);
+        logger.info("MapSmsServiceListener initialized (persist: {}, events: {})",
+                this.persistDialogs, this.publishEvents);
     }
 
     //
@@ -86,13 +81,13 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
                 dialogId, invokeId);
 
         try {
-            // 1. Persist dialog state to Redis
-            if (persistDialogs && dialogStore != null) {
+            // 1. Persist dialog state to NATS KV
+            if (persistDialogs) {
                 persistDialogState(dialog, "MO_FORWARD_SM", invokeId);
             }
 
-            // 2. Publish event (implementation will convert to appropriate format)
-            if (publishToKafka && eventPublisher != null) {
+            // 2. Publish event to NATS
+            if (publishEvents && eventPublisher != null) {
                 // Create event payload - publisher will handle serialization
                 java.util.Map<String, Object> eventData = new java.util.HashMap<>();
                 eventData.put("type", "MO_FORWARD_SM");
@@ -100,7 +95,7 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
                 eventData.put("invokeId", invokeId);
                 eventData.put("request", request);
 
-                // Publish to topic: sms.mo.incoming
+                // Publish to subject: sms.mo.incoming
                 eventPublisher.publishEvent("sms.mo.incoming", eventData);
 
                 logger.info("Published MO-ForwardSM event (dialog: {})", dialogId);
@@ -245,16 +240,17 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
         logger.debug("Dialog delimiter (dialog: {})", dialog.getLocalDialogId());
     }
 
-    
+
     public void onDialogRequest(MAPDialog dialog) {
         Long dialogId = dialog.getLocalDialogId();
         logger.info("Dialog request received (dialog: {})", dialogId);
 
         try {
             // Create initial dialog state
-            if (persistDialogs && dialogStore != null) {
-                DialogState state = DialogStateConverter.fromDialog(dialog);
+            if (persistDialogs) {
+                DialogState state = createDialogState(dialog);
                 if (state != null) {
+                    state.setDialogState("REQUEST");
                     dialogStore.storeDialog(state);
                     logger.debug("Stored initial dialog state (dialog: {})", dialogId);
                 }
@@ -264,17 +260,20 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
         }
     }
 
-    
+
     public void onDialogAccept(MAPDialog dialog) {
         Long dialogId = dialog.getLocalDialogId();
         logger.info("Dialog accepted (dialog: {})", dialogId);
 
         try {
             // Update dialog state
-            if (persistDialogs && dialogStore != null) {
+            if (persistDialogs) {
                 DialogState state = dialogStore.loadDialog(dialogId);
+                if (state == null) {
+                    state = createDialogState(dialog);
+                }
                 if (state != null) {
-                    DialogStateConverter.updateFromDialog(state, dialog);
+                    state.setDialogState("ACCEPTED");
                     dialogStore.updateDialog(state);
                 }
             }
@@ -283,14 +282,14 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
         }
     }
 
-    
+
     public void onDialogClose(MAPDialog dialog) {
         Long dialogId = dialog.getLocalDialogId();
         logger.info("Dialog closed (dialog: {})", dialogId);
 
         try {
-            // Delete dialog state from Redis
-            if (persistDialogs && dialogStore != null) {
+            // Delete dialog state from NATS KV
+            if (persistDialogs) {
                 dialogStore.deleteDialog(dialogId);
                 logger.debug("Deleted dialog state (dialog: {})", dialogId);
             }
@@ -299,14 +298,14 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
         }
     }
 
-    
+
     public void onDialogAbort(MAPDialog dialog) {
         Long dialogId = dialog.getLocalDialogId();
         logger.warn("Dialog aborted (dialog: {})", dialogId);
 
         try {
             // Delete dialog state
-            if (persistDialogs && dialogStore != null) {
+            if (persistDialogs) {
                 dialogStore.deleteDialog(dialogId);
             }
         } catch (Exception e) {
@@ -314,14 +313,14 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
         }
     }
 
-    
+
     public void onDialogTimeout(MAPDialog dialog) {
         Long dialogId = dialog.getLocalDialogId();
         logger.warn("Dialog timeout (dialog: {})", dialogId);
 
         try {
             // Delete dialog state
-            if (persistDialogs && dialogStore != null) {
+            if (persistDialogs) {
                 dialogStore.deleteDialog(dialogId);
             }
         } catch (Exception e) {
@@ -334,7 +333,7 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
     //
 
     /**
-     * Persist dialog state to Redis.
+     * Persist dialog state to NATS KV.
      *
      * @param dialog MAP dialog
      * @param operationType Operation type
@@ -347,21 +346,17 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
             // Load existing state or create new
             DialogState state = dialogStore.loadDialog(dialogId);
             if (state == null) {
-                state = DialogStateConverter.fromDialog(dialog);
-            } else {
-                DialogStateConverter.updateFromDialog(state, dialog);
+                // Create new dialog state from MAP dialog
+                state = createDialogState(dialog);
             }
 
             if (state != null) {
-                // Add pending invoke
-                DialogStateConverter.addPendingInvoke(
-                        state,
-                        invokeId.longValue(),
-                        operationType,
-                        30000  // 30 second timeout
-                );
+                // Add operation info to custom data
+                state.putCustomData("lastOperation", operationType);
+                state.putCustomData("invokeId", String.valueOf(invokeId));
+                state.setDialogState("ACTIVE");
 
-                // Store/update in Redis
+                // Store/update in NATS KV
                 dialogStore.updateDialog(state);
 
                 logger.debug("Persisted dialog state (dialog: {}, operation: {}, invoke: {})",
@@ -370,6 +365,38 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
         } catch (Exception e) {
             logger.error("Failed to persist dialog state", e);
         }
+    }
+
+    /**
+     * Create DialogState from MAPDialog (license-safe extraction of primitives).
+     *
+     * @param dialog MAP dialog
+     * @return DialogState with primitive data only
+     */
+    private DialogState createDialogState(MAPDialog dialog) {
+        DialogState state = new DialogState();
+        state.setDialogId(dialog.getLocalDialogId());
+
+        if (dialog.getRemoteDialogId() != null) {
+            state.setRemoteDialogId(String.valueOf(dialog.getRemoteDialogId()));
+        }
+
+        state.setDialogState(dialog.getState() != null ? dialog.getState().toString() : "UNKNOWN");
+        state.setServiceType("SMS");
+
+        // Extract address information safely
+        try {
+            if (dialog.getLocalAddress() != null) {
+                state.setLocalAddress(dialog.getLocalAddress().toString());
+            }
+            if (dialog.getRemoteAddress() != null) {
+                state.setRemoteAddress(dialog.getRemoteAddress().toString());
+            }
+        } catch (Exception e) {
+            logger.warn("Could not extract dialog addresses", e);
+        }
+
+        return state;
     }
 
     /**
@@ -382,10 +409,10 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
         try {
             DialogState state = dialogStore.loadDialog(dialogId);
             if (state != null) {
-                // Remove pending invoke
-                DialogStateConverter.removePendingInvoke(state, invokeId.longValue());
+                // Mark invoke as completed
+                state.putCustomData("lastInvokeCompleted", String.valueOf(invokeId));
 
-                // Update in Redis
+                // Update in NATS KV
                 dialogStore.updateDialog(state);
 
                 logger.debug("Updated dialog state after response (dialog: {}, invoke: {})",

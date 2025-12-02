@@ -32,10 +32,10 @@ description = (
     "SS7 HA Gateway is an open-source, carrier-grade protocol handling layer designed for "
     "SS7/MAP/CAP networks. It serves as a bridge between legacy telecom infrastructure "
     "(HLR, MSC, VLR) and modern application ecosystems.\n\n"
-    "The gateway provides high availability through distributed state management using Redis "
-    "and implements an event-driven architecture by publishing clean JSON events to Kafka. "
-    "This allows modern applications to interact with SS7 networks without needing complex "
-    "SS7 stack knowledge."
+    "The gateway provides high availability through distributed state management using NATS "
+    "JetStream Key-Value Store and implements a low-latency event-driven architecture by "
+    "publishing clean JSON events to NATS Core. This allows modern applications to interact "
+    "with SS7 networks without needing complex SS7 stack knowledge or heavy middleware."
 )
 pdf.chapter_body(description)
 
@@ -47,7 +47,7 @@ audience = (
     "- Mobile Virtual Network Operators (MVNOs): To implement core network services efficiently.\n"
     "- Value-Added Service (VAS) Providers: Companies building SMS Centers (SMSC), USSD gateways, or Location Based Services (LBS).\n"
     "- FinTech & Authentication Providers: For delivering OTPs and 2FA services via reliable SMS channels.\n"
-    "- Software Developers: Who need to integrate with SS7 networks using familiar tools like Kafka and JSON, avoiding the steep learning curve of SS7 protocols."
+    "- Software Developers: Who need to integrate with SS7 networks using familiar tools like NATS and JSON, avoiding the steep learning curve of SS7 protocols."
 )
 pdf.chapter_body(audience)
 
@@ -56,18 +56,17 @@ pdf.chapter_title('Key Advantages')
 advantages = (
     "The SS7 HA Gateway offers several significant benefits:\n\n"
     "1. High Availability & Reliability:\n"
-    "   Utilizes Redis Cluster for distributed dialog state management, ensuring continuous operation even if a gateway node fails. "
-    "It guarantees sub-15-second failover and zero message loss.\n\n"
-    "2. Scalability:\n"
-    "   Built for horizontal scalability. You can simply add more gateway instances to handle increased load, supporting 50,000+ dialogs per second per instance.\n\n"
-    "3. Modern Event-Driven Architecture:\n"
-    "   Decouples the complex SS7 layer from business logic. Applications consume standard JSON events from Kafka, enabling integration in any programming language (Java, Python, Node.js, etc.).\n\n"
-    "4. Cost-Effective & Open Source:\n"
-    "   Reduces reliance on expensive proprietary hardware and software. It runs on standard commodity hardware or containerized environments (Docker/Kubernetes).\n\n"
-    "5. Ease of Operations:\n"
-    "   Includes comprehensive monitoring with Prometheus metrics, health checks, and structured logging, making it production-ready out of the box."
+    "   Utilizes NATS JetStream Key-Value Store for distributed dialog state management. This ensures continuous operation even if a gateway node fails, as any other instance can retrieve the dialog state and continue the session. It guarantees seamless failover and data consistency.\n\n"
+    "2. Simplified Architecture & Operations:\n"
+    "   Replaces the complex combination of Apache Kafka and Redis with a single, lightweight NATS Server. This drastically reduces operational complexity and deployment footprint.\n\n"
+    "3. Scalability & Load Balancing:\n"
+    "   Built for horizontal scalability using NATS Queue Groups. Incoming SS7 traffic is automatically load-balanced across all available gateway instances. You can simply add more gateway nodes to handle increased load.\n\n"
+    "4. Ultra-Low Latency Event-Driven Design:\n"
+    "   Decouples the complex SS7 layer from business logic using NATS Pub/Sub. Applications consume standard JSON events with sub-millisecond latency.\n\n"
+    "5. Cost-Effective & Open Source:\n"
+    "   Reduces reliance on expensive proprietary hardware. It runs efficiently on standard commodity hardware or containerized environments (Docker/Kubernetes)."
 )
 pdf.chapter_body(advantages)
 
-pdf.output('SS7_HA_Gateway_Brief.pdf', 'F')
-print("PDF generated successfully: SS7_HA_Gateway_Brief.pdf")
+pdf.output('SS7_HA_Gateway_Brief_v2.pdf', 'F')
+print("PDF generated successfully: SS7_HA_Gateway_Brief_v2.pdf")

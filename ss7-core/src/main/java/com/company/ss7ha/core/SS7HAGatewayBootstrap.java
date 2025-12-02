@@ -2,8 +2,8 @@ package com.company.ss7ha.core;
 
 import com.company.ss7ha.core.events.EventPublisher;
 import com.company.ss7ha.core.listeners.MapSmsServiceListener;
-import com.company.ss7ha.core.redis.RedisDialogStore;
-import com.company.ss7ha.core.redis.RedisDialogStoreImpl;
+import com.company.ss7ha.core.store.DialogStore;
+import com.company.ss7ha.core.store.NatsDialogStore;
 import com.company.ss7ha.nats.publisher.SS7NatsPublisher;
 import com.company.ss7ha.nats.subscriber.SS7NatsSubscriber;
 import com.company.ss7ha.messages.MapSmsMessage;
@@ -25,14 +25,7 @@ import org.restcomm.protocols.ss7.tcap.api.TCAPStack;
 import org.restcomm.protocols.ss7.tcap.TCAPStackImpl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import redis.clients.jedis.UnifiedJedis;
-import redis.clients.jedis.JedisPooled;
-import redis.clients.jedis.JedisCluster;
-import redis.clients.jedis.HostAndPort;
-
-import java.util.HashSet;
 import java.util.Properties;
-import java.util.Set;
 
 /**
  * SS7 HA Gateway Bootstrap (Corsac JSS7 API)
@@ -52,11 +45,11 @@ public class SS7HAGatewayBootstrap {
     private MAPStackImpl mapStack;
 
     // HA components
-    private RedisDialogStore dialogStore;
     private EventPublisher eventPublisher;
     private MapSmsServiceListener smsServiceListener;
     private SS7NatsPublisher natsPublisher;
     private SS7NatsSubscriber natsSubscriber;
+    private DialogStore dialogStore;
 
     // Configuration
     private final Properties config;
@@ -71,12 +64,11 @@ public class SS7HAGatewayBootstrap {
 
         try {
             initializeWorkerPool();
-            initializeRedis();
             initializeM3UA();
             initializeSCCP();
             initializeMAP();
+            initializeNats(); // Initialize NATS (and Store) BEFORE listeners
             registerMapListeners();
-            initializeNats();
             startComponents();
 
             logger.info("SS7 HA Gateway started successfully");
@@ -95,48 +87,6 @@ public class SS7HAGatewayBootstrap {
         byte[] prefix = new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x01 };
         uuidGenerator = new UUIDGenerator(prefix);
         logger.info("WorkerPool initialized with 4 threads");
-    }
-
-    private void initializeRedis() {
-        logger.info("Initializing Redis dialog store...");
-        try {
-            String redisNodes = System.getProperty("redis.cluster.nodes", 
-                config.getProperty("redis.cluster.nodes", "localhost:6379"));
-            String ttlStr = System.getProperty("redis.dialog.ttl", 
-                config.getProperty("redis.dialog.ttl", "3600"));
-            int dialogTTL = Integer.parseInt(ttlStr);
-
-            String[] nodes = redisNodes.split(",");
-            UnifiedJedis jedisClient;
-
-            if (nodes.length == 1) {
-                String[] parts = nodes[0].trim().split(":");
-                String host = parts[0];
-                int port = parts.length > 1 ? Integer.parseInt(parts[1]) : 6379;
-                logger.info("Initializing Redis in Standalone mode: {}:{}", host, port);
-                jedisClient = new JedisPooled(host, port);
-            } else {
-                Set<HostAndPort> clusterNodes = new HashSet<>();
-                for (String node : nodes) {
-                    String[] parts = node.trim().split(":");
-                    String host = parts[0];
-                    int port = parts.length > 1 ? Integer.parseInt(parts[1]) : 6379;
-                    clusterNodes.add(new HostAndPort(host, port));
-                }
-                logger.info("Initializing Redis in Cluster mode with {} nodes", clusterNodes.size());
-                jedisClient = new JedisCluster(clusterNodes);
-            }
-
-            dialogStore = new RedisDialogStoreImpl(jedisClient, dialogTTL);
-            if (dialogStore.isHealthy()) {
-                logger.info("Redis dialog store initialized successfully");
-            } else {
-                logger.warn("Redis dialog store initialized but health check failed");
-            }
-        } catch (Exception e) {
-            logger.error("Failed to initialize Redis", e);
-            throw new RuntimeException("Redis initialization failed", e);
-        }
     }
 
     private void initializeM3UA() {
@@ -186,13 +136,16 @@ public class SS7HAGatewayBootstrap {
     private void registerMapListeners() {
         logger.info("Registering MAP service listeners...");
         try {
-            boolean persistDialogs = Boolean.parseBoolean(config.getProperty("redis.persist.dialogs", "true"));
+            // NATS-based architecture with distributed state
             boolean publishEvents = Boolean.parseBoolean(config.getProperty("events.publish.enabled", "true"));
-            int dialogTTL = Integer.parseInt(config.getProperty("redis.dialog.ttl", "3600"));
-            smsServiceListener = new MapSmsServiceListener(dialogStore, eventPublisher, persistDialogs, publishEvents, dialogTTL);
+            boolean persistDialogs = Boolean.parseBoolean(config.getProperty("dialog.persist.enabled", "true"));
+            
+            // Pass the initialized dialogStore here
+            smsServiceListener = new MapSmsServiceListener(dialogStore, eventPublisher, persistDialogs, publishEvents);
+            
             MAPProvider mapProvider = mapStack.getProvider();
             mapProvider.getMAPServiceSms().addMAPServiceListener(smsServiceListener);
-            logger.info("MAP service listeners registered");
+            logger.info("MAP service listeners registered (Persistence: {}, Events: {})", persistDialogs, publishEvents);
         } catch (Exception e) {
             logger.error("Failed to register MAP listeners", e);
             throw new RuntimeException("MAP listener registration failed", e);
@@ -207,6 +160,16 @@ public class SS7HAGatewayBootstrap {
                 config.getProperty("nats.server.url", "nats://localhost:4222"));
             String queueGroup = System.getProperty("nats.queue.group",
                 config.getProperty("nats.queue.group", "ss7-gateway-group-v2"));
+
+            // Initialize Dialog Store (KV)
+            try {
+                int ttl = Integer.parseInt(config.getProperty("dialog.ttl.seconds", "600"));
+                dialogStore = new NatsDialogStore(natsUrl, ttl);
+                logger.info("NATS Dialog Store initialized (TTL: {}s)", ttl);
+            } catch (Exception e) {
+                logger.error("Failed to initialize NATS Dialog Store (Continuing in stateless mode)", e);
+                dialogStore = null;
+            }
 
             // Initialize NATS publisher first
             natsPublisher = new SS7NatsPublisher(natsUrl);
@@ -277,13 +240,13 @@ public class SS7HAGatewayBootstrap {
         try {
             if (natsSubscriber != null) natsSubscriber.stop();
             if (natsPublisher != null) natsPublisher.stop();
+            if (dialogStore != null) dialogStore.close();
             if (mapStack != null) mapStack.stop();
             if (sccpStack != null) sccpStack.stop();
             if (m3uaManagement != null) m3uaManagement.stop();
             if (sctpManagement != null) sctpManagement.stop();
             if (workerPool != null) workerPool.stop();
             if (eventPublisher != null) eventPublisher.close();
-            if (dialogStore != null) dialogStore.close(); // Close Redis
             logger.info("SS7 HA Gateway stopped successfully");
         } catch (Exception e) {
             logger.error("Error stopping SS7 HA Gateway", e);
