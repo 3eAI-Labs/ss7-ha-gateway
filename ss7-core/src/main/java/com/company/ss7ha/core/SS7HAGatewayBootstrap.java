@@ -1,6 +1,8 @@
 package com.company.ss7ha.core;
 
 import com.company.ss7ha.core.events.EventPublisher;
+import com.company.ss7ha.core.handlers.MtSmsMessageHandler;
+import com.company.ss7ha.core.handlers.SriMessageHandler;
 import com.company.ss7ha.core.listeners.MapSmsServiceListener;
 import com.company.ss7ha.core.store.DialogStore;
 import com.company.ss7ha.core.store.NatsDialogStore;
@@ -141,7 +143,7 @@ public class SS7HAGatewayBootstrap {
             boolean persistDialogs = Boolean.parseBoolean(config.getProperty("dialog.persist.enabled", "true"));
             
             // Pass the initialized dialogStore here
-            smsServiceListener = new MapSmsServiceListener(dialogStore, eventPublisher, persistDialogs, publishEvents);
+            smsServiceListener = new MapSmsServiceListener(dialogStore, eventPublisher, natsPublisher, persistDialogs, publishEvents);
             
             MAPProvider mapProvider = mapStack.getProvider();
             mapProvider.getMAPServiceSms().addMAPServiceListener(smsServiceListener);
@@ -179,28 +181,13 @@ public class SS7HAGatewayBootstrap {
             // Initialize NATS subscriber with loopback handler
             natsSubscriber = new SS7NatsSubscriber(natsUrl, queueGroup);
 
-            // Register MT SMS handler with loopback logic
-            natsSubscriber.setMtSmsHandler(mtSmsMessage -> {
-                logger.info("Processing MT SMS request: {} from {} to {}",
-                    mtSmsMessage.getMessageId(),
-                    mtSmsMessage.getSender(),
-                    mtSmsMessage.getRecipient());
+            // Register MT SMS handler with actual MAP sending logic
+            MtSmsMessageHandler mtSmsHandler = new MtSmsMessageHandler(mapStack, eventPublisher);
+            natsSubscriber.setMtSmsHandler(mtSmsHandler);
 
-                // Create loopback MO SMS response (swap sender/recipient)
-                MapSmsMessage moMessage = new MapSmsMessage();
-                moMessage.setMessageId(mtSmsMessage.getMessageId() + "_MO");
-                moMessage.setCorrelationId(mtSmsMessage.getMessageId());
-                moMessage.setSender(mtSmsMessage.getRecipient());   // Swap
-                moMessage.setRecipient(mtSmsMessage.getSender());   // Swap
-                moMessage.setContent("Echo: " + mtSmsMessage.getContent());
-                moMessage.setSmsType(SmsType.MO_FORWARD_SM);
-                moMessage.setTimestamp(Instant.now());
-
-                // Publish loopback MO SMS
-                natsPublisher.publishMoSmsResponse(moMessage);
-                logger.info("Loopback MO SMS sent (from {} to {})",
-                    moMessage.getSender(), moMessage.getRecipient());
-            });
+            // Register SRI handler with actual MAP sending logic
+            SriMessageHandler sriHandler = new SriMessageHandler(mapStack, eventPublisher);
+            natsSubscriber.setSriHandler(sriHandler);
 
             logger.info("NATS Subscriber initialized with loopback handler");
         } catch (Exception e) {

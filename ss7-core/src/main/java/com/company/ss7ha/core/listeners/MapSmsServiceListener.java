@@ -3,8 +3,12 @@ package com.company.ss7ha.core.listeners;
 import com.company.ss7ha.core.events.EventPublisher;
 import com.company.ss7ha.core.model.DialogState;
 import com.company.ss7ha.core.store.DialogStore;
+import com.company.ss7ha.messages.MapSriMessage; // Added import
+import com.company.ss7ha.messages.SS7Message; // Added import
+import com.company.ss7ha.nats.publisher.SS7NatsPublisher; // Added import
 import org.restcomm.protocols.ss7.map.api.MAPDialog;
 import org.restcomm.protocols.ss7.map.api.MAPMessage;
+import org.restcomm.protocols.ss7.map.api.MAPProvider; // Added import
 import org.restcomm.protocols.ss7.map.api.service.sms.MAPDialogSms;
 import org.restcomm.protocols.ss7.map.api.service.sms.MAPServiceSmsListener;
 import org.restcomm.protocols.ss7.map.api.service.sms.MoForwardShortMessageRequest;
@@ -41,6 +45,7 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
 
     private final DialogStore dialogStore;
     private final EventPublisher eventPublisher;
+    private final SS7NatsPublisher natsPublisher; // Added NATS Publisher
 
     // Configuration
     private final boolean persistDialogs;
@@ -51,15 +56,18 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
      *
      * @param dialogStore Dialog store (NATS KV, in-memory, etc.) - can be null for stateless mode
      * @param eventPublisher Event publisher (NATS, gRPC, etc.)
+     * @param natsPublisher NATS Publisher for sending responses
      * @param persistDialogs Enable dialog persistence
      * @param publishEvents Enable event publishing
      */
     public MapSmsServiceListener(DialogStore dialogStore,
                                  EventPublisher eventPublisher,
+                                 SS7NatsPublisher natsPublisher,
                                  boolean persistDialogs,
                                  boolean publishEvents) {
         this.dialogStore = dialogStore;
         this.eventPublisher = eventPublisher;
+        this.natsPublisher = natsPublisher;
         this.persistDialogs = persistDialogs && (dialogStore != null);
         this.publishEvents = publishEvents;
 
@@ -223,6 +231,39 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
             // Remove pending invoke
             if (persistDialogs && dialogStore != null) {
                 updateDialogAfterResponse(dialogId, invokeId);
+            }
+
+            // Extract CorrelationId (stored as UserObject)
+            String correlationId = (String) dialog.getUserObject();
+            if (correlationId == null) {
+                logger.warn("No CorrelationId found in dialog user object for SRI-SM response (dialog: {})", dialogId);
+                return;
+            }
+
+            // Extract response details
+            String msisdn = response.getMsisdn().getAddress();
+            String imsi = response.getImsi() != null ? response.getImsi().getData() : null;
+            String mscAddress = response.getMscAddress() != null ? response.getMscAddress().toString() : null;
+            String vlrAddress = response.getVlrAddress() != null ? response.getVlrAddress().toString() : null;
+            Boolean subscriberAvailable = response.getSubscriberPresent() != null ? response.getSubscriberPresent().getSubscriberPresent() : null;
+
+            // Create MapSriMessage response
+            com.company.ss7ha.messages.MapSriMessage sriResponse = new com.company.ss7ha.messages.MapSriMessage();
+            sriResponse.setCorrelationId(correlationId);
+            sriResponse.setMsisdn(msisdn);
+            sriResponse.setImsi(imsi);
+            sriResponse.setMscAddress(mscAddress);
+            sriResponse.setVlrAddress(vlrAddress);
+            sriResponse.setSubscriberAvailable(subscriberAvailable);
+            sriResponse.setSriType(com.company.ss7ha.messages.MapSriMessage.SriType.SRI_SM_RESPONSE);
+            sriResponse.setDirection(com.company.ss7ha.messages.SS7Message.MessageDirection.INBOUND);
+            
+            // Publish to NATS
+            if (natsPublisher != null) {
+                natsPublisher.publishSriResponse(sriResponse);
+                logger.info("Published SRI-SM response for {} [CorrId: {}] to NATS", msisdn, correlationId);
+            } else {
+                logger.error("NATS Publisher not available, cannot publish SRI-SM response for {}", msisdn);
             }
 
         } catch (Exception e) {
