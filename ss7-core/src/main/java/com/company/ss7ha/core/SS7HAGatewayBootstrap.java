@@ -1,50 +1,34 @@
 package com.company.ss7ha.core;
 
+import com.company.ss7ha.core.config.SS7Configuration;
 import com.company.ss7ha.core.events.EventPublisher;
 import com.company.ss7ha.core.handlers.MtSmsMessageHandler;
 import com.company.ss7ha.core.handlers.SriMessageHandler;
 import com.company.ss7ha.core.listeners.MapSmsServiceListener;
+import com.company.ss7ha.core.manager.SS7StackManager;
 import com.company.ss7ha.core.store.DialogStore;
 import com.company.ss7ha.core.store.NatsDialogStore;
 import com.company.ss7ha.nats.publisher.SS7NatsPublisher;
 import com.company.ss7ha.nats.subscriber.SS7NatsSubscriber;
-import com.company.ss7ha.messages.MapSmsMessage;
-import com.company.ss7ha.messages.MapSmsMessage.SmsType;
-import java.time.Instant;
-import com.mobius.software.common.dal.timers.WorkerPool;
-import com.mobius.software.telco.protocols.ss7.common.UUIDGenerator;
-import org.restcomm.protocols.sctp.SctpManagementImpl;
-import org.restcomm.protocols.ss7.m3ua.M3UAManagement;
-import org.restcomm.protocols.ss7.m3ua.impl.M3UAManagementImpl;
+import com.company.ss7ha.manager.api.GatewayRestApi;
+import com.company.ss7ha.manager.spi.GatewayStatusProvider;
 import org.restcomm.protocols.ss7.map.api.MAPProvider;
 import org.restcomm.protocols.ss7.map.api.MAPStack;
-import org.restcomm.protocols.ss7.map.MAPStackImpl;
-import org.restcomm.protocols.ss7.sccp.SccpProvider;
-import org.restcomm.protocols.ss7.sccp.SccpStack;
-import org.restcomm.protocols.ss7.sccp.impl.SccpStackImpl;
-import org.restcomm.protocols.ss7.tcap.api.TCAPProvider;
-import org.restcomm.protocols.ss7.tcap.api.TCAPStack;
-import org.restcomm.protocols.ss7.tcap.TCAPStackImpl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Properties;
 
 /**
  * SS7 HA Gateway Bootstrap (Corsac JSS7 API)
- * ...
+ * Refactored to use SS7StackManager and NatsConnectionManager.
+ * Now includes REST API for health checks and metrics.
  */
 public class SS7HAGatewayBootstrap {
 
     private static final Logger logger = LoggerFactory.getLogger(SS7HAGatewayBootstrap.class);
-
-    // SS7 Stack components
-    private WorkerPool workerPool;
-    private UUIDGenerator uuidGenerator;
-    private SctpManagementImpl sctpManagement;
-    private M3UAManagementImpl m3uaManagement;
-    private SccpStack sccpStack;
-    private TCAPStack tcapStack;
-    private MAPStackImpl mapStack;
 
     // HA components
     private EventPublisher eventPublisher;
@@ -52,6 +36,9 @@ public class SS7HAGatewayBootstrap {
     private SS7NatsPublisher natsPublisher;
     private SS7NatsSubscriber natsSubscriber;
     private DialogStore dialogStore;
+    
+    // Management API
+    private GatewayRestApi restApi;
 
     // Configuration
     private final Properties config;
@@ -65,89 +52,83 @@ public class SS7HAGatewayBootstrap {
         logger.info("Starting SS7 HA Gateway...");
 
         try {
-            initializeWorkerPool();
-            initializeM3UA();
-            initializeSCCP();
-            initializeMAP();
-            initializeNats(); // Initialize NATS (and Store) BEFORE listeners
+            // Initialize SS7 Stack via Manager
+            SS7Configuration ss7Config = new SS7Configuration();
+            ss7Config.loadFromProperties(config);
+            
+            logger.info("Initializing SS7 Stack Manager...");
+            SS7StackManager.getInstance().initialize(ss7Config);
+            SS7StackManager.getInstance().start();
+
+            // Initialize NATS and Listeners
+            initializeNats();
             registerMapListeners();
-            startComponents();
+            
+            // Start NATS Subscriber (Publisher started in initializeNats)
+            if (natsSubscriber != null) {
+                natsSubscriber.start();
+                logger.info("NATS Subscriber started");
+            }
+            
+            // Start REST API
+            startRestApi();
 
             logger.info("SS7 HA Gateway started successfully");
 
         } catch (Exception e) {
             logger.error("Failed to start SS7 HA Gateway", e);
+            stop(); // Ensure cleanup
             throw e;
         }
     }
+    
+    private void startRestApi() {
+        int apiPort = Integer.parseInt(config.getProperty("api.port", "8080"));
+        
+        GatewayStatusProvider statusProvider = new GatewayStatusProvider() {
+            @Override
+            public boolean isHealthy() {
+                // Simple health check: Stack must be ready and NATS connected
+                return SS7StackManager.getInstance().isReady() && 
+                       natsPublisher != null && natsPublisher.isConnected();
+            }
 
-    private void initializeWorkerPool() throws Exception {
-        logger.info("Initializing WorkerPool...");
-        String stackName = config.getProperty("stack.name", "SS7-HA-Gateway");
-        workerPool = new WorkerPool(stackName + "-WorkerPool");
-        workerPool.start(4);
-        byte[] prefix = new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x01 };
-        uuidGenerator = new UUIDGenerator(prefix);
-        logger.info("WorkerPool initialized with 4 threads");
-    }
-
-    private void initializeM3UA() {
-        logger.info("Initializing M3UA layer...");
-        try {
-            String m3uaName = config.getProperty("m3ua.name", "M3UA-STACK");
-            // Use the 4-arg constructor found in GatewayTest
-            sctpManagement = new SctpManagementImpl("SCTP-" + m3uaName, 4, 4, 4);
-            
-            // Corsac API: M3UAManagementImpl(name, persistDir, uuidGenerator, workerPool)
-            m3uaManagement = new M3UAManagementImpl(m3uaName, null, uuidGenerator, workerPool);
-            m3uaManagement.setTransportManagement(sctpManagement);
-            logger.info("M3UA layer initialized");
-        } catch (Exception e) {
-            logger.error("Failed to initialize M3UA", e);
-            throw new RuntimeException("M3UA initialization failed", e);
-        }
-    }
-
-    private void initializeSCCP() {
-        logger.info("Initializing SCCP layer...");
-        try {
-            String sccpName = config.getProperty("sccp.name", "SCCP-STACK");
-            sccpStack = new SccpStackImpl(sccpName, false, workerPool);
-            logger.info("SCCP layer initialized");
-        } catch (Exception e) {
-            logger.error("Failed to initialize SCCP", e);
-            throw new RuntimeException("SCCP initialization failed", e);
-        }
-    }
-
-    private void initializeMAP() {
-        logger.info("Initializing MAP layer...");
-        try {
-            String mapName = config.getProperty("map.name", "MAP-STACK");
-            int ssn = Integer.parseInt(config.getProperty("sccp.local.ssn", "8"));
-            SccpProvider sccpProvider = sccpStack.getSccpProvider();
-            mapStack = new MAPStackImpl(mapName, sccpProvider, ssn, workerPool);
-            tcapStack = mapStack.getTCAPStack();
-            logger.info("MAP layer initialized with SSN: {}", ssn);
-        } catch (Exception e) {
-            logger.error("Failed to initialize MAP", e);
-            throw new RuntimeException("MAP initialization failed", e);
-        }
+            @Override
+            public Map<String, Object> getMetrics() {
+                Map<String, Object> metrics = new HashMap<>();
+                metrics.put("stack.ready", SS7StackManager.getInstance().isReady());
+                metrics.put("nats.publisher.stats", natsPublisher != null ? natsPublisher.getStats() : "Not initialized");
+                metrics.put("nats.subscriber.stats", natsSubscriber != null ? natsSubscriber.getStats() : "Not initialized");
+                
+                // Add memory metrics
+                Runtime rt = Runtime.getRuntime();
+                metrics.put("jvm.memory.total", rt.totalMemory());
+                metrics.put("jvm.memory.free", rt.freeMemory());
+                metrics.put("jvm.memory.used", rt.totalMemory() - rt.freeMemory());
+                
+                return metrics;
+            }
+        };
+        
+        restApi = new GatewayRestApi(statusProvider);
+        restApi.start(apiPort);
     }
 
     private void registerMapListeners() {
         logger.info("Registering MAP service listeners...");
         try {
-            // NATS-based architecture with distributed state
             boolean publishEvents = Boolean.parseBoolean(config.getProperty("events.publish.enabled", "true"));
             boolean persistDialogs = Boolean.parseBoolean(config.getProperty("dialog.persist.enabled", "true"));
             
-            // Pass the initialized dialogStore here
             smsServiceListener = new MapSmsServiceListener(dialogStore, eventPublisher, natsPublisher, persistDialogs, publishEvents);
             
-            MAPProvider mapProvider = mapStack.getProvider();
-            mapProvider.getMAPServiceSms().addMAPServiceListener(smsServiceListener);
-            logger.info("MAP service listeners registered (Persistence: {}, Events: {})", persistDialogs, publishEvents);
+            MAPProvider mapProvider = SS7StackManager.getInstance().getMapProvider();
+            if (mapProvider != null) {
+                mapProvider.getMAPServiceSms().addMAPServiceListener(smsServiceListener);
+                logger.info("MAP service listeners registered (Persistence: {}, Events: {})", persistDialogs, publishEvents);
+            } else {
+                logger.error("MAP Provider is null, cannot register listeners");
+            }
         } catch (Exception e) {
             logger.error("Failed to register MAP listeners", e);
             throw new RuntimeException("MAP listener registration failed", e);
@@ -157,13 +138,12 @@ public class SS7HAGatewayBootstrap {
     private void initializeNats() {
         logger.info("Initializing NATS...");
         try {
-            // Get NATS configuration from system properties or config file
             String natsUrl = System.getProperty("nats.server.url",
                 config.getProperty("nats.server.url", "nats://localhost:4222"));
             String queueGroup = System.getProperty("nats.queue.group",
                 config.getProperty("nats.queue.group", "ss7-gateway-group-v2"));
 
-            // Initialize Dialog Store (KV)
+            // Initialize Dialog Store (Uses NatsConnectionManager internally)
             try {
                 int ttl = Integer.parseInt(config.getProperty("dialog.ttl.seconds", "600"));
                 dialogStore = new NatsDialogStore(natsUrl, ttl);
@@ -173,67 +153,43 @@ public class SS7HAGatewayBootstrap {
                 dialogStore = null;
             }
 
-            // Initialize NATS publisher first
+            // Initialize NATS publisher (Uses NatsConnectionManager internally)
             natsPublisher = new SS7NatsPublisher(natsUrl);
             natsPublisher.start();
-            logger.info("NATS Publisher initialized and connected");
+            logger.info("NATS Publisher initialized");
 
-            // Initialize NATS subscriber with loopback handler
+            // Initialize NATS subscriber (Uses NatsConnectionManager internally)
             natsSubscriber = new SS7NatsSubscriber(natsUrl, queueGroup);
 
-            // Register MT SMS handler with actual MAP sending logic
+            // Register handlers
+            // Using SS7StackManager to get MAPStack
+            MAPStack mapStack = SS7StackManager.getInstance().getStack().getMapStack();
+            
             MtSmsMessageHandler mtSmsHandler = new MtSmsMessageHandler(mapStack, eventPublisher);
             natsSubscriber.setMtSmsHandler(mtSmsHandler);
 
-            // Register SRI handler with actual MAP sending logic
             SriMessageHandler sriHandler = new SriMessageHandler(mapStack, eventPublisher);
             natsSubscriber.setSriHandler(sriHandler);
 
-            logger.info("NATS Subscriber initialized with loopback handler");
+            logger.info("NATS Subscriber initialized with handlers");
         } catch (Exception e) {
             logger.error("Failed to initialize NATS", e);
             throw new RuntimeException("NATS initialization failed", e);
         }
     }
 
-    private void startComponents() throws Exception {
-        logger.info("Starting SS7 stack components...");
-        try {
-            if (sctpManagement != null) {
-                sctpManagement.start();
-                logger.info("SCTP started");
-            }
-            m3uaManagement.start();
-            logger.info("M3UA started");
-            sccpStack.start();
-            logger.info("SCCP started");
-            mapStack.start();
-            logger.info("MAP started (TCAP started internally)");
-
-            if (natsSubscriber != null) {
-                natsSubscriber.start();
-                logger.info("NATS Subscriber started");
-            }
-
-            logger.info("All SS7 stack components started successfully");
-        } catch (Exception e) {
-            logger.error("Failed to start SS7 components", e);
-            throw e;
-        }
-    }
-
     public void stop() {
         logger.info("Stopping SS7 HA Gateway...");
         try {
+            if (restApi != null) restApi.stop();
             if (natsSubscriber != null) natsSubscriber.stop();
             if (natsPublisher != null) natsPublisher.stop();
             if (dialogStore != null) dialogStore.close();
-            if (mapStack != null) mapStack.stop();
-            if (sccpStack != null) sccpStack.stop();
-            if (m3uaManagement != null) m3uaManagement.stop();
-            if (sctpManagement != null) sctpManagement.stop();
-            if (workerPool != null) workerPool.stop();
             if (eventPublisher != null) eventPublisher.close();
+            
+            // Stop SS7 Stack via Manager
+            SS7StackManager.getInstance().stop();
+            
             logger.info("SS7 HA Gateway stopped successfully");
         } catch (Exception e) {
             logger.error("Error stopping SS7 HA Gateway", e);
@@ -253,7 +209,7 @@ public class SS7HAGatewayBootstrap {
             logger.error("Failed to load configuration", e);
             System.exit(1);
         }
-        EventPublisher eventPublisher = null; 
+        EventPublisher eventPublisher = null; // Placeholder
         SS7HAGatewayBootstrap gateway = new SS7HAGatewayBootstrap(config, eventPublisher);
         try {
             gateway.start();

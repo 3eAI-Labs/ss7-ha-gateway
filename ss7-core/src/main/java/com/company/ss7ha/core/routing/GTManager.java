@@ -2,6 +2,7 @@ package com.company.ss7ha.core.routing;
 
 import com.company.ss7ha.core.config.SS7Configuration;
 import com.company.ss7ha.core.config.SS7Configuration.InternalGT;
+import com.company.ss7ha.core.config.SS7Configuration.LocalAddressConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -13,7 +14,7 @@ import java.util.regex.Pattern;
 
 /**
  * Manages hierarchical GT routing and load balancing
- * Routes from generic GTs (GTg1, GTg2) to internal GTs (GT1...GTn)
+ * Routes from local GTs to internal GTs (GT1...GTn)
  */
 public class GTManager {
     private static final Logger logger = LoggerFactory.getLogger(GTManager.class);
@@ -25,11 +26,11 @@ public class GTManager {
     
     // Current active generic GT
     private volatile String activeGenericGT;
-    private volatile boolean useGenericGT2 = false;
+    private volatile int currentGtIndex = 0;
     
     public GTManager(SS7Configuration config) {
         this.config = config;
-        this.activeGenericGT = config.getGenericGT1();
+        this.activeGenericGT = getDefaultGT();
         initializeRoutingPatterns();
         initializeStatistics();
     }
@@ -56,8 +57,9 @@ public class GTManager {
      * Initialize statistics tracking
      */
     private void initializeStatistics() {
-        gtStatistics.put(config.getGenericGT1(), new GTStats(config.getGenericGT1()));
-        gtStatistics.put(config.getGenericGT2(), new GTStats(config.getGenericGT2()));
+        for (LocalAddressConfig localAddr : config.getLocalAddressConfigs()) {
+            gtStatistics.put(localAddr.getGlobalTitle(), new GTStats(localAddr.getGlobalTitle()));
+        }
         
         for (InternalGT gt : config.getInternalGTs()) {
             gtStatistics.put(gt.getAddress(), new GTStats(gt.getAddress()));
@@ -123,12 +125,10 @@ public class GTManager {
      * Get default GT when no pattern matches
      */
     private String getDefaultGT() {
-        // Return first active GT as default
-        return config.getInternalGTs().stream()
-            .filter(InternalGT::isActive)
-            .findFirst()
-            .map(InternalGT::getAddress)
-            .orElse(config.getGenericGT1());
+        if (!config.getLocalAddressConfigs().isEmpty()) {
+            return config.getLocalAddressConfigs().get(0).getGlobalTitle();
+        }
+        return "0000000000"; // Fallback if absolutely no config
     }
     
     /**
@@ -137,19 +137,22 @@ public class GTManager {
     public void failoverGenericGT() {
         if (config.getHaMode().equals("ACTIVE_STANDBY")) {
             String previousGT = activeGenericGT;
+            List<LocalAddressConfig> configs = config.getLocalAddressConfigs();
             
-            if (activeGenericGT.equals(config.getGenericGT1())) {
-                activeGenericGT = config.getGenericGT2();
-                useGenericGT2 = true;
+            if (configs.size() > 1) {
+                // Switch to next GT in list
+                currentGtIndex = (currentGtIndex + 1) % configs.size();
+                activeGenericGT = configs.get(currentGtIndex).getGlobalTitle();
+                
+                logger.warn("Generic GT failover: {} -> {}", previousGT, activeGenericGT);
+                
+                // Update statistics
+                if (gtStatistics.containsKey(previousGT)) {
+                    gtStatistics.get(previousGT).recordFailure();
+                }
             } else {
-                activeGenericGT = config.getGenericGT1();
-                useGenericGT2 = false;
+                logger.warn("Failover requested but only one Generic GT configured.");
             }
-            
-            logger.warn("Generic GT failover: {} -> {}", previousGT, activeGenericGT);
-            
-            // Update statistics
-            gtStatistics.get(previousGT).recordFailure();
         }
     }
     

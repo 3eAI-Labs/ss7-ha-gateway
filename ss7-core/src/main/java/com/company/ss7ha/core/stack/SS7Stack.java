@@ -1,15 +1,14 @@
 package com.company.ss7ha.core.stack;
 
 import com.company.ss7ha.core.config.SS7Configuration;
+import com.company.ss7ha.core.config.SS7Configuration.LocalAddressConfig;
 import com.mobius.software.common.dal.timers.WorkerPool;
 import com.mobius.software.telco.protocols.ss7.common.UUIDGenerator;
+import org.restcomm.protocols.sctp.SctpManagementImpl;
 import org.restcomm.protocols.ss7.m3ua.M3UAManagement;
 import org.restcomm.protocols.ss7.m3ua.impl.M3UAManagementImpl;
 import org.restcomm.protocols.ss7.sccp.SccpProvider;
-import org.restcomm.protocols.ss7.sccp.SccpStack;
 import org.restcomm.protocols.ss7.sccp.impl.SccpStackImpl;
-import org.restcomm.protocols.ss7.tcap.api.TCAPProvider;
-import org.restcomm.protocols.ss7.tcap.api.TCAPStack;
 import org.restcomm.protocols.ss7.map.MAPStackImpl;
 import org.restcomm.protocols.ss7.map.api.MAPProvider;
 import org.restcomm.protocols.ss7.cap.CAPStackImpl;
@@ -18,7 +17,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Core SS7 Stack management with MAP and CAP support (Corsac JSS7 API)
+ * Core SS7 Stack management with MAP and CAP support (Corsac JSS7 API).
+ * Encapsulates SCTP, M3UA, SCCP, MAP, and CAP layers.
  */
 public class SS7Stack {
     private static final Logger logger = LoggerFactory.getLogger(SS7Stack.class);
@@ -29,7 +29,8 @@ public class SS7Stack {
     private final UUIDGenerator uuidGenerator;
 
     // SS7 Stack components
-    private M3UAManagement m3uaManagement;
+    private SctpManagementImpl sctpManagement;
+    private M3UAManagementImpl m3uaManagement;
     private SccpStackImpl sccpStack;
     private MAPStackImpl mapStack;
     private CAPStackImpl capStack;
@@ -65,7 +66,7 @@ public class SS7Stack {
             // Start WorkerPool first
             workerPool.start(4); // 4 worker threads
 
-            // Initialize M3UA
+            // Initialize M3UA (includes SCTP)
             initializeM3UA();
 
             // Initialize SCCP
@@ -107,6 +108,12 @@ public class SS7Stack {
         logger.info("Starting SS7 Stack: {}", stackName);
 
         try {
+            // Start SCTP
+            if (sctpManagement != null) {
+                sctpManagement.start();
+                logger.info("SCTP started");
+            }
+
             // Start M3UA
             m3uaManagement.start();
             logger.info("M3UA started");
@@ -165,6 +172,11 @@ public class SS7Stack {
             if (m3uaManagement != null) {
                 m3uaManagement.stop();
             }
+            
+            // Stop SCTP
+            if (sctpManagement != null) {
+                sctpManagement.stop();
+            }
 
             logger.info("SS7 Stack stopped successfully");
 
@@ -190,19 +202,22 @@ public class SS7Stack {
         capStack = null;
         sccpStack = null;
         m3uaManagement = null;
+        sctpManagement = null;
     }
 
     private void initializeM3UA() throws Exception {
-        logger.info("Initializing M3UA layer");
+        logger.info("Initializing M3UA layer (with SCTP)");
+
+        // Initialize SCTP Management
+        // 4 workers per queue, matching the simplified assumption
+        sctpManagement = new SctpManagementImpl("SCTP-" + stackName, 4, 4, 4);
+        // Note: Production would need sctpManagement.setPersistDir(...) but passing null for now/in-memory
 
         // Corsac API: M3UAManagementImpl(name, persistDir, uuidGenerator, workerPool)
         m3uaManagement = new M3UAManagementImpl(stackName, null, uuidGenerator, workerPool);
-
-        // Configure M3UA (simplified - production needs full config)
-        // - Add SCTP associations
-        // - Add application servers
-        // - Add routes
-        // See Corsac JSS7 documentation for details
+        
+        // Link SCTP to M3UA
+        m3uaManagement.setTransportManagement(sctpManagement);
 
         logger.info("M3UA initialized with ASP: {}, AS: {}",
                    config.getM3uaAspName(), config.getM3uaAsName());
@@ -214,14 +229,16 @@ public class SS7Stack {
         // Corsac API: SccpStackImpl(name, isStp, workerPool)
         sccpStack = new SccpStackImpl(stackName, false, workerPool);
 
-        // In Corsac, M3UA is set through management, not directly
-        // The SccpStack manages the MTP3 layer internally
-
-        // Configure SCCP (simplified - production needs full config)
-        // - Set local address
-        // - Add remote addresses
-        // - Configure Global Title Translation
-        // - Add routing rules
+        // Configure Local Addresses (Dynamic GT + SSN)
+        for (LocalAddressConfig addrConfig : config.getLocalAddressConfigs()) {
+            logger.info("Configuring Local Address - GT: {}, SSN: {}", 
+                addrConfig.getGlobalTitle(), addrConfig.getSsn());
+            
+            // Note: Actual binding of GT/SSN to the SCCP Router would happen here.
+            // In a full implementation, we would create GlobalTitle objects and 
+            // add them to the SCCP Router's routing table.
+            // For now, the MAP stack initialization below will bind the primary SSN.
+        }
 
         logger.info("SCCP initialized with local SPC: {}, remote SPC: {}",
                    config.getSccpLocalSpc(), config.getSccpRemoteSpc());
@@ -256,17 +273,18 @@ public class SS7Stack {
     public MAPProvider getMapProvider() {
         return mapStack != null ? mapStack.getProvider() : null;
     }
+    
+    public MAPStackImpl getMapStack() {
+        return mapStack;
+    }
 
     public CAPProvider getCapProvider() {
         return capStack != null ? capStack.getProvider() : null;
     }
 
-    public TCAPProvider getTcapProvider() {
-        return mapStack != null ? mapStack.getTCAPStack().getProvider() : null;
-    }
-
-    public SccpStack getSccpStack() { return sccpStack; }
+    public SccpStackImpl getSccpStack() { return sccpStack; }
     public M3UAManagement getM3uaManagement() { return m3uaManagement; }
+    public SctpManagementImpl getSctpManagement() { return sctpManagement; }
     public boolean isStarted() { return started; }
     public boolean isInitialized() { return initialized; }
 }

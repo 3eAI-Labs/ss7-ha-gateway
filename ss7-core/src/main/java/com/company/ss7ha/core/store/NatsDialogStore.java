@@ -1,10 +1,10 @@
 package com.company.ss7ha.core.store;
 
 import com.company.ss7ha.core.model.DialogState;
+import com.company.ss7ha.nats.manager.NatsConnectionManager;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.nats.client.Connection;
-import io.nats.client.Nats;
 import io.nats.client.api.KeyValueConfiguration;
 import io.nats.client.KeyValueManagement;
 import io.nats.client.KeyValue;
@@ -41,8 +41,9 @@ public class NatsDialogStore implements DialogStore {
         this.objectMapper = new ObjectMapper();
         this.objectMapper.registerModule(new JavaTimeModule());
 
-        logger.info("Connecting to NATS at: {}", natsUrl);
-        this.natsConnection = Nats.connect(natsUrl);
+        logger.info("Initializing NATS Dialog Store via Manager: {}", natsUrl);
+        NatsConnectionManager.getInstance(natsUrl).connect();
+        this.natsConnection = NatsConnectionManager.getInstance().getConnection();
 
         // Create or get KV bucket
         KeyValueManagement kvm = natsConnection.keyValueManagement();
@@ -128,10 +129,8 @@ public class NatsDialogStore implements DialogStore {
 
     @Override
     public void close() throws Exception {
-        logger.info("Closing NATS dialog store connection");
-        if (natsConnection != null && !natsConnection.getStatus().equals(Connection.Status.CLOSED)) {
-            natsConnection.close();
-        }
+        logger.info("Closing NATS DialogStore usage (connection is shared/managed)");
+        // Do NOT close natsConnection as it is managed by NatsConnectionManager
     }
 
     /**

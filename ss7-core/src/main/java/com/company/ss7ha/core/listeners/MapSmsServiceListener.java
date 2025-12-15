@@ -1,14 +1,14 @@
 package com.company.ss7ha.core.listeners;
 
 import com.company.ss7ha.core.events.EventPublisher;
+import com.company.ss7ha.core.handlers.CorrelationIdWrapper; // Added
 import com.company.ss7ha.core.model.DialogState;
 import com.company.ss7ha.core.store.DialogStore;
-import com.company.ss7ha.messages.MapSriMessage; // Added import
-import com.company.ss7ha.messages.SS7Message; // Added import
-import com.company.ss7ha.nats.publisher.SS7NatsPublisher; // Added import
+import com.company.ss7ha.messages.MapSriMessage;
+import com.company.ss7ha.messages.SS7Message;
+import com.company.ss7ha.nats.publisher.SS7NatsPublisher;
 import org.restcomm.protocols.ss7.map.api.MAPDialog;
-import org.restcomm.protocols.ss7.map.api.MAPMessage;
-import org.restcomm.protocols.ss7.map.api.MAPProvider; // Added import
+import org.restcomm.protocols.ss7.map.api.MAPMessage; // Retained
 import org.restcomm.protocols.ss7.map.api.service.sms.MAPDialogSms;
 import org.restcomm.protocols.ss7.map.api.service.sms.MAPServiceSmsListener;
 import org.restcomm.protocols.ss7.map.api.service.sms.MoForwardShortMessageRequest;
@@ -21,23 +21,14 @@ import org.restcomm.protocols.ss7.tcap.api.tc.dialog.Dialog;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.restcomm.protocols.ss7.map.api.service.sms.LocationInfoWithLMSI;
+import org.restcomm.protocols.ss7.commonapp.api.primitives.ISDNAddressString;
+import org.restcomm.protocols.ss7.map.api.service.lsm.AdditionalNumber;
+
+import java.io.Externalizable;
+
 /**
  * MAP SMS Service Listener with NATS persistence and event integration.
- *
- * This listener:
- * 1. Receives MAP SMS operations (MO-ForwardSM, MT-ForwardSM, SRI-SM)
- * 2. Optionally stores dialog state in NATS JetStream KV for failover
- * 3. Publishes events to NATS
- *
- * CRITICAL: This maintains the AGPL firewall by:
- * - Extracting primitive data to DialogState (NATS KV)
- * - Converting to JSON messages (NATS)
- * - NO JSS7 objects cross the NATS boundary!
- *
- * LICENSE: AGPL-3.0 (part of ss7-ha-gateway)
- *
- * @author SS7-HA-Gateway Team
- * @since 1.0.0
  */
 public class MapSmsServiceListener implements MAPServiceSmsListener {
 
@@ -45,21 +36,12 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
 
     private final DialogStore dialogStore;
     private final EventPublisher eventPublisher;
-    private final SS7NatsPublisher natsPublisher; // Added NATS Publisher
+    private final SS7NatsPublisher natsPublisher;
 
     // Configuration
     private final boolean persistDialogs;
     private final boolean publishEvents;
 
-    /**
-     * Constructor with Dialog Store and Event Publisher integration.
-     *
-     * @param dialogStore Dialog store (NATS KV, in-memory, etc.) - can be null for stateless mode
-     * @param eventPublisher Event publisher (NATS, gRPC, etc.)
-     * @param natsPublisher NATS Publisher for sending responses
-     * @param persistDialogs Enable dialog persistence
-     * @param publishEvents Enable event publishing
-     */
     public MapSmsServiceListener(DialogStore dialogStore,
                                  EventPublisher eventPublisher,
                                  SS7NatsPublisher natsPublisher,
@@ -75,10 +57,7 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
                 this.persistDialogs, this.publishEvents);
     }
 
-    //
-    // MO-ForwardSM (Mobile Originated SMS)
-    //
-
+    // MO-ForwardSM
     @Override
     public void onMoForwardShortMessageRequest(MoForwardShortMessageRequest request) {
         MAPDialogSms dialog = request.getMAPDialog();
@@ -89,30 +68,19 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
                 dialogId, invokeId);
 
         try {
-            // 1. Persist dialog state to NATS KV
             if (persistDialogs) {
                 persistDialogState(dialog, "MO_FORWARD_SM", invokeId);
             }
 
-            // 2. Publish event to NATS
             if (publishEvents && eventPublisher != null) {
-                // Create event payload - publisher will handle serialization
                 java.util.Map<String, Object> eventData = new java.util.HashMap<>();
                 eventData.put("type", "MO_FORWARD_SM");
                 eventData.put("dialogId", dialogId);
                 eventData.put("invokeId", invokeId);
                 eventData.put("request", request);
-
-                // Publish to subject: sms.mo.incoming
                 eventPublisher.publishEvent("sms.mo.incoming", eventData);
-
                 logger.info("Published MO-ForwardSM event (dialog: {})", dialogId);
             }
-
-            // 3. Application logic would go here
-            // For now, just log that we received it
-            // Actual processing happens in the SMSC Gateway (consumer side)
-
         } catch (Exception e) {
             logger.error("Error processing MO-ForwardSM (dialog: {}, invoke: {})",
                     dialogId, invokeId, e);
@@ -129,23 +97,16 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
                 dialogId, invokeId);
 
         try {
-            // Remove pending invoke from dialog state
             if (persistDialogs && dialogStore != null) {
                 updateDialogAfterResponse(dialogId, invokeId);
             }
-
-            // Response handling (acknowledge, etc.)
-
         } catch (Exception e) {
             logger.error("Error processing MO-ForwardSM response (dialog: {}, invoke: {})",
                     dialogId, invokeId, e);
         }
     }
 
-    //
-    // MT-ForwardSM (Mobile Terminated SMS)
-    //
-
+    // MT-ForwardSM
     @Override
     public void onMtForwardShortMessageRequest(MtForwardShortMessageRequest request) {
         MAPDialogSms dialog = request.getMAPDialog();
@@ -156,14 +117,9 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
                 dialogId, invokeId);
 
         try {
-            // Persist dialog state
             if (persistDialogs && dialogStore != null) {
                 persistDialogState(dialog, "MT_FORWARD_SM", invokeId);
             }
-
-            // MT-ForwardSM converter would go here
-            // For now, just log
-
         } catch (Exception e) {
             logger.error("Error processing MT-ForwardSM (dialog: {}, invoke: {})",
                     dialogId, invokeId, e);
@@ -180,21 +136,16 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
                 dialogId, invokeId);
 
         try {
-            // Remove pending invoke
             if (persistDialogs && dialogStore != null) {
                 updateDialogAfterResponse(dialogId, invokeId);
             }
-
         } catch (Exception e) {
             logger.error("Error processing MT-ForwardSM response (dialog: {}, invoke: {})",
                     dialogId, invokeId, e);
         }
     }
 
-    //
-    // SRI-SM (Send Routing Info for SM)
-    //
-
+    // SRI-SM
     @Override
     public void onSendRoutingInfoForSMRequest(SendRoutingInfoForSMRequest request) {
         MAPDialogSms dialog = request.getMAPDialog();
@@ -205,13 +156,9 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
                 dialogId, invokeId);
 
         try {
-            // Persist dialog state
             if (persistDialogs && dialogStore != null) {
                 persistDialogState(dialog, "SRI_SM", invokeId);
             }
-
-            // SRI-SM logic would go here
-
         } catch (Exception e) {
             logger.error("Error processing SRI-SM (dialog: {}, invoke: {})",
                     dialogId, invokeId, e);
@@ -228,26 +175,49 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
                 dialogId, invokeId);
 
         try {
-            // Remove pending invoke
             if (persistDialogs && dialogStore != null) {
                 updateDialogAfterResponse(dialogId, invokeId);
             }
 
-            // Extract CorrelationId (stored as UserObject)
-            String correlationId = (String) dialog.getUserObject();
+            Externalizable userObject = dialog.getUserObject();
+            String correlationId = null;
+            if (userObject instanceof CorrelationIdWrapper) {
+                correlationId = ((CorrelationIdWrapper) userObject).getCorrelationId();
+            }
+
             if (correlationId == null) {
                 logger.warn("No CorrelationId found in dialog user object for SRI-SM response (dialog: {})", dialogId);
                 return;
             }
 
-            // Extract response details
-            String msisdn = response.getMsisdn().getAddress();
-            String imsi = response.getImsi() != null ? response.getImsi().getData() : null;
-            String mscAddress = response.getMscAddress() != null ? response.getMscAddress().toString() : null;
-            String vlrAddress = response.getVlrAddress() != null ? response.getVlrAddress().toString() : null;
-            Boolean subscriberAvailable = response.getSubscriberPresent() != null ? response.getSubscriberPresent().getSubscriberPresent() : null;
+            String imsi = response.getIMSI() != null ? response.getIMSI().getData() : null;
+            String msisdn = null;
+            String mscAddress = null;
+            String vlrAddress = null;
+            Boolean subscriberAvailable = null;
 
-            // Create MapSriMessage response
+            LocationInfoWithLMSI locationInfo = response.getLocationInfoWithLMSI();
+            if (locationInfo != null) {
+                ISDNAddressString networkNodeNumber = locationInfo.getNetworkNodeNumber();
+                if (networkNodeNumber != null) {
+                    if (!locationInfo.getGprsNodeIndicator()) {
+                        mscAddress = networkNodeNumber.getAddress();
+                    } else {
+                        vlrAddress = networkNodeNumber.getAddress();
+                    }
+                }
+
+                AdditionalNumber additionalNumber = locationInfo.getAdditionalNumber();
+                if (additionalNumber != null) {
+                    if (locationInfo.getGprsNodeIndicator() && additionalNumber.getMSCNumber() != null) {
+                        mscAddress = additionalNumber.getMSCNumber().getAddress();
+                    } else if (!locationInfo.getGprsNodeIndicator() && additionalNumber.getSGSNNumber() != null) {
+                        vlrAddress = additionalNumber.getSGSNNumber().getAddress();
+                    }
+                }
+                subscriberAvailable = true;
+            }
+
             com.company.ss7ha.messages.MapSriMessage sriResponse = new com.company.ss7ha.messages.MapSriMessage();
             sriResponse.setCorrelationId(correlationId);
             sriResponse.setMsisdn(msisdn);
@@ -258,7 +228,6 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
             sriResponse.setSriType(com.company.ss7ha.messages.MapSriMessage.SriType.SRI_SM_RESPONSE);
             sriResponse.setDirection(com.company.ss7ha.messages.SS7Message.MessageDirection.INBOUND);
             
-            // Publish to NATS
             if (natsPublisher != null) {
                 natsPublisher.publishSriResponse(sriResponse);
                 logger.info("Published SRI-SM response for {} [CorrId: {}] to NATS", msisdn, correlationId);
@@ -272,22 +241,16 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
         }
     }
 
-    //
-    // Dialog Lifecycle Events
-    //
-
-    
+    // Dialog Events
     public void onDialogDelimiter(MAPDialog dialog) {
         logger.debug("Dialog delimiter (dialog: {})", dialog.getLocalDialogId());
     }
-
 
     public void onDialogRequest(MAPDialog dialog) {
         Long dialogId = dialog.getLocalDialogId();
         logger.info("Dialog request received (dialog: {})", dialogId);
 
         try {
-            // Create initial dialog state
             if (persistDialogs) {
                 DialogState state = createDialogState(dialog);
                 if (state != null) {
@@ -301,13 +264,11 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
         }
     }
 
-
     public void onDialogAccept(MAPDialog dialog) {
         Long dialogId = dialog.getLocalDialogId();
         logger.info("Dialog accepted (dialog: {})", dialogId);
 
         try {
-            // Update dialog state
             if (persistDialogs) {
                 DialogState state = dialogStore.loadDialog(dialogId);
                 if (state == null) {
@@ -323,13 +284,11 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
         }
     }
 
-
     public void onDialogClose(MAPDialog dialog) {
         Long dialogId = dialog.getLocalDialogId();
         logger.info("Dialog closed (dialog: {})", dialogId);
 
         try {
-            // Delete dialog state from NATS KV
             if (persistDialogs) {
                 dialogStore.deleteDialog(dialogId);
                 logger.debug("Deleted dialog state (dialog: {})", dialogId);
@@ -339,13 +298,11 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
         }
     }
 
-
     public void onDialogAbort(MAPDialog dialog) {
         Long dialogId = dialog.getLocalDialogId();
         logger.warn("Dialog aborted (dialog: {})", dialogId);
 
         try {
-            // Delete dialog state
             if (persistDialogs) {
                 dialogStore.deleteDialog(dialogId);
             }
@@ -354,13 +311,11 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
         }
     }
 
-
     public void onDialogTimeout(MAPDialog dialog) {
         Long dialogId = dialog.getLocalDialogId();
         logger.warn("Dialog timeout (dialog: {})", dialogId);
 
         try {
-            // Delete dialog state
             if (persistDialogs) {
                 dialogStore.deleteDialog(dialogId);
             }
@@ -369,63 +324,34 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
         }
     }
 
-    //
-    // Helper Methods
-    //
-
-    /**
-     * Persist dialog state to NATS KV.
-     *
-     * @param dialog MAP dialog
-     * @param operationType Operation type
-     * @param invokeId Invoke ID
-     */
     private void persistDialogState(MAPDialog dialog, String operationType, Integer invokeId) {
         try {
             Long dialogId = dialog.getLocalDialogId();
-
-            // Load existing state or create new
             DialogState state = dialogStore.loadDialog(dialogId);
             if (state == null) {
-                // Create new dialog state from MAP dialog
                 state = createDialogState(dialog);
             }
 
             if (state != null) {
-                // Add operation info to custom data
                 state.putCustomData("lastOperation", operationType);
                 state.putCustomData("invokeId", String.valueOf(invokeId));
                 state.setDialogState("ACTIVE");
-
-                // Store/update in NATS KV
                 dialogStore.updateDialog(state);
-
-                logger.debug("Persisted dialog state (dialog: {}, operation: {}, invoke: {})",
-                        dialogId, operationType, invokeId);
+                logger.debug("Persisted dialog state (dialog: {}, operation: {}, invoke: {})", dialogId, operationType, invokeId);
             }
         } catch (Exception e) {
             logger.error("Failed to persist dialog state", e);
         }
     }
 
-    /**
-     * Create DialogState from MAPDialog (license-safe extraction of primitives).
-     *
-     * @param dialog MAP dialog
-     * @return DialogState with primitive data only
-     */
     private DialogState createDialogState(MAPDialog dialog) {
         DialogState state = new DialogState();
         state.setDialogId(dialog.getLocalDialogId());
-
         if (dialog.getRemoteDialogId() != null) {
             state.setRemoteDialogId(String.valueOf(dialog.getRemoteDialogId()));
         }
-
         state.setDialogState(dialog.getState() != null ? dialog.getState().toString() : "UNKNOWN");
         state.setServiceType("SMS");
-
-        // Extract address information safely
         try {
             if (dialog.getLocalAddress() != null) {
                 state.setLocalAddress(dialog.getLocalAddress().toString());
@@ -436,61 +362,39 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
         } catch (Exception e) {
             logger.warn("Could not extract dialog addresses", e);
         }
-
         return state;
     }
 
-    /**
-     * Update dialog state after receiving response.
-     *
-     * @param dialogId Dialog ID
-     * @param invokeId Invoke ID to remove
-     */
     private void updateDialogAfterResponse(Long dialogId, Integer invokeId) {
         try {
             DialogState state = dialogStore.loadDialog(dialogId);
             if (state != null) {
-                // Mark invoke as completed
                 state.putCustomData("lastInvokeCompleted", String.valueOf(invokeId));
-
-                // Update in NATS KV
                 dialogStore.updateDialog(state);
-
-                logger.debug("Updated dialog state after response (dialog: {}, invoke: {})",
-                        dialogId, invokeId);
+                logger.debug("Updated dialog state after response (dialog: {}, invoke: {})", dialogId, invokeId);
             }
         } catch (Exception e) {
             logger.error("Failed to update dialog state after response", e);
         }
     }
 
-    //
-    // Unused Events (Implemented for interface compliance)
-    //
-
     @Override
-    public void onErrorComponent(MAPDialog dialog, Integer invokeId,
-                                 org.restcomm.protocols.ss7.map.api.errors.MAPErrorMessage mapErrorMessage) {
+    public void onErrorComponent(MAPDialog dialog, Integer invokeId, org.restcomm.protocols.ss7.map.api.errors.MAPErrorMessage mapErrorMessage) {
         logger.warn("Error component received (dialog: {}, invoke: {}, error: {})",
                 dialog.getLocalDialogId(), invokeId,
                 mapErrorMessage != null ? mapErrorMessage.getErrorCode() : "unknown");
     }
 
     @Override
-    public void onRejectComponent(MAPDialog dialog, Integer invokeId,
-                                  org.restcomm.protocols.ss7.tcap.asn.comp.Problem problem,
-                                  boolean isLocalOriginated) {
+    public void onRejectComponent(MAPDialog dialog, Integer invokeId, org.restcomm.protocols.ss7.tcap.asn.comp.Problem problem, boolean isLocalOriginated) {
         logger.warn("Reject component received (dialog: {}, invoke: {}, problem: {}, local: {})",
                 dialog.getLocalDialogId(), invokeId, problem, isLocalOriginated);
     }
 
     @Override
     public void onInvokeTimeout(MAPDialog dialog, Integer invokeId) {
-        logger.warn("Invoke timeout (dialog: {}, invoke: {})",
-                dialog.getLocalDialogId(), invokeId);
-
+        logger.warn("Invoke timeout (dialog: {}, invoke: {})", dialog.getLocalDialogId(), invokeId);
         try {
-            // Remove timed out invoke
             if (persistDialogs && dialogStore != null) {
                 updateDialogAfterResponse(dialog.getLocalDialogId(), invokeId);
             }
@@ -501,8 +405,6 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
 
     @Override
     public void onNoteSubscriberPresentRequest(org.restcomm.protocols.ss7.map.api.service.sms.NoteSubscriberPresentRequest request) {
-        // Note Subscriber Present - indicates subscriber is available
-        // Not implemented in this version
         logger.debug("Note Subscriber Present request received");
     }
 
@@ -553,6 +455,5 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
 
     @Override
     public void onMAPMessage(MAPMessage message) {
-        // Generic message handler - not used
     }
 }

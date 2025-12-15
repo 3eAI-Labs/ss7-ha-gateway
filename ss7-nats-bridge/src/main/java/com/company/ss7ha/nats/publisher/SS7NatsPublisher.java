@@ -1,11 +1,14 @@
 package com.company.ss7ha.nats.publisher;
 
-import io.nats.client.*;
+import io.nats.client.Connection;
+import io.nats.client.Message;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.company.ss7ha.messages.*;
-import org.apache.log4j.Logger;
+import com.company.ss7ha.nats.manager.NatsConnectionManager;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -17,16 +20,17 @@ import java.time.Duration;
  * Replaces Kafka producer functionality
  */
 public class SS7NatsPublisher {
-    private static final Logger logger = Logger.getLogger(SS7NatsPublisher.class);
+    private static final Logger logger = LoggerFactory.getLogger(SS7NatsPublisher.class);
 
     private final String natsUrl;
     private final ObjectMapper objectMapper;
-    private Connection natsConnection;
+    // Connection managed by NatsConnectionManager
 
     // NATS subjects for publishing to SMSC
     private static final String SUBJECT_MO_SMS_RESP = "map.mo.sms.response";
     private static final String SUBJECT_MT_SMS_RESP = "map.mt.sms.response";
     private static final String SUBJECT_SRI_RESP = "map.sri.response";
+    private static final String SUBJECT_CHECK_IMEI_REQ = "eir.v1.check.request";
 
     public SS7NatsPublisher(String natsUrl) {
         this.natsUrl = natsUrl != null ? natsUrl : "nats://localhost:4222";
@@ -36,49 +40,35 @@ public class SS7NatsPublisher {
     }
 
     /**
-     * Initialize NATS connection
+     * Initialize NATS connection via Manager
      */
     public void start() throws IOException, InterruptedException {
-        logger.info("Starting SS7 NATS publisher, connecting to: " + natsUrl);
+        logger.info("Starting SS7 NATS publisher, utilizing manager for: " + natsUrl);
+        NatsConnectionManager.getInstance(natsUrl).connect();
+        logger.info("SS7 NATS publisher ready");
+    }
 
-        Options options = new Options.Builder()
-            .server(natsUrl)
-            .maxReconnects(-1)  // Unlimited reconnects
-            .reconnectWait(Duration.ofMillis(1000))
-            .connectionTimeout(Duration.ofMillis(5000))
-            .pingInterval(Duration.ofMillis(120000))
-            .maxPingsOut(2)
-            .errorListener(new ErrorListener() {
-                @Override
-                public void errorOccurred(Connection conn, String error) {
-                    logger.error("NATS error: " + error);
-                }
+    /**
+     * Send CheckIMEI Request to EIR Core Logic (Request-Reply)
+     * @param request The CheckImeiRequest POJO
+     * @return The CheckImeiResponse from the EIR Core
+     */
+    public CheckImeiResponse sendCheckImeiRequest(CheckImeiRequest request) throws Exception {
+        Connection natsConnection = NatsConnectionManager.getInstance().getConnection();
+        if (natsConnection == null || natsConnection.getStatus() != Connection.Status.CONNECTED) {
+            throw new IllegalStateException("NATS connection not available");
+        }
 
-                @Override
-                public void exceptionOccurred(Connection conn, Exception exp) {
-                    logger.error("NATS exception", exp);
-                }
+        byte[] reqBytes = objectMapper.writeValueAsBytes(request);
+        
+        // Synchronous Request with 200ms timeout (per Data Contract)
+        Message reply = natsConnection.request(SUBJECT_CHECK_IMEI_REQ, reqBytes, Duration.ofMillis(200));
+        
+        if (reply == null) {
+            throw new java.util.concurrent.TimeoutException("EIR Core did not reply in 200ms");
+        }
 
-                @Override
-                public void slowConsumerDetected(Connection conn, Consumer consumer) {
-                    logger.warn("NATS slow consumer detected");
-                }
-            })
-            .connectionListener(new ConnectionListener() {
-                @Override
-                public void connectionEvent(Connection conn, Events type) {
-                    logger.info("NATS connection event: " + type);
-                    if (type == Events.RECONNECTED) {
-                        logger.info("NATS reconnected successfully");
-                    } else if (type == Events.DISCONNECTED) {
-                        logger.warn("NATS disconnected");
-                    }
-                }
-            })
-            .build();
-
-        natsConnection = Nats.connect(options);
-        logger.info("SS7 NATS publisher connected successfully");
+        return objectMapper.readValue(reply.getData(), CheckImeiResponse.class);
     }
 
     /**
@@ -86,6 +76,7 @@ public class SS7NatsPublisher {
      * This is an SMS received from the mobile network that needs to be delivered to ESME
      */
     public void publishMoSmsResponse(MapSmsMessage smsMessage) {
+        Connection natsConnection = NatsConnectionManager.getInstance().getConnection();
         if (natsConnection == null || natsConnection.getStatus() != Connection.Status.CONNECTED) {
             logger.error("Cannot publish MO SMS, NATS not connected");
             throw new IllegalStateException("NATS connection not available");
@@ -110,6 +101,7 @@ public class SS7NatsPublisher {
      * This is a delivery status update for an MT SMS sent to the mobile network
      */
     public void publishMtSmsResponse(MapSmsMessage smsMessage) {
+        Connection natsConnection = NatsConnectionManager.getInstance().getConnection();
         if (natsConnection == null || natsConnection.getStatus() != Connection.Status.CONNECTED) {
             logger.error("Cannot publish MT SMS response, NATS not connected");
             throw new IllegalStateException("NATS connection not available");
@@ -132,6 +124,7 @@ public class SS7NatsPublisher {
      * Publish SRI response (routing info from HLR) to SMSC
      */
     public void publishSriResponse(MapSriMessage sriMessage) {
+        Connection natsConnection = NatsConnectionManager.getInstance().getConnection();
         if (natsConnection == null || natsConnection.getStatus() != Connection.Status.CONNECTED) {
             logger.error("Cannot publish SRI response, NATS not connected");
             throw new IllegalStateException("NATS connection not available");
@@ -154,19 +147,18 @@ public class SS7NatsPublisher {
      * Check if publisher is connected
      */
     public boolean isConnected() {
-        return natsConnection != null &&
-               natsConnection.getStatus() == Connection.Status.CONNECTED;
+        return NatsConnectionManager.getInstance().isConnected();
     }
 
     /**
      * Get connection statistics
      */
     public String getStats() {
-        if (natsConnection == null) {
+        if (!NatsConnectionManager.getInstance().isConnected()) {
             return "Not connected";
         }
 
-        Statistics stats = natsConnection.getStatistics();
+        io.nats.client.Statistics stats = NatsConnectionManager.getInstance().getConnection().getStatistics();
         return String.format("SS7 NATS Stats - In: %d msgs/%d bytes, Out: %d msgs/%d bytes",
             stats.getInMsgs(), stats.getInBytes(),
             stats.getOutMsgs(), stats.getOutBytes());
@@ -177,22 +169,6 @@ public class SS7NatsPublisher {
      */
     public void stop() {
         logger.info("Stopping SS7 NATS publisher");
-
-        if (natsConnection != null) {
-            try {
-                // Flush any pending messages
-                natsConnection.flush(Duration.ofSeconds(5));
-
-                // Close connection
-                natsConnection.close();
-                logger.info("SS7 NATS publisher stopped");
-
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                logger.warn("Interrupted during NATS close", e);
-            } catch (Exception e) {
-                logger.error("Error closing NATS connection", e);
-            }
-        }
+        NatsConnectionManager.getInstance().close();
     }
 }

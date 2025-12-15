@@ -6,11 +6,32 @@ import com.company.ss7ha.messages.SS7Message;
 import com.company.ss7ha.nats.subscriber.SS7NatsSubscriber;
 import org.restcomm.protocols.ss7.map.api.MAPProvider;
 import org.restcomm.protocols.ss7.map.api.MAPStack;
+import org.restcomm.protocols.ss7.map.api.MAPDialog;
+import org.restcomm.protocols.ss7.map.api.MAPException;
+import org.restcomm.protocols.ss7.map.api.MAPParameterFactory;
 import org.restcomm.protocols.ss7.map.api.service.sms.MAPDialogSms;
 import org.restcomm.protocols.ss7.map.api.service.sms.SendRoutingInfoForSMRequest;
-import org.restcomm.protocols.ss7.map.api.primitives.ISDNAddressString;
+import org.restcomm.protocols.ss7.commonapp.api.primitives.ISDNAddressString;
+import org.restcomm.protocols.ss7.commonapp.api.primitives.AddressNature;
+import org.restcomm.protocols.ss7.commonapp.api.primitives.AddressString;
+import org.restcomm.protocols.ss7.commonapp.api.primitives.NumberingPlan;
+import org.restcomm.protocols.ss7.commonapp.api.primitives.MAPExtensionContainer;
+import org.restcomm.protocols.ss7.commonapp.api.primitives.IMSI;
+import org.restcomm.protocols.ss7.map.api.service.sms.SM_RP_MTI;
+import org.restcomm.protocols.ss7.map.api.service.sms.SM_RP_SMEA;
+import org.restcomm.protocols.ss7.map.api.service.sms.SMDeliveryNotIntended;
+import org.restcomm.protocols.ss7.map.api.service.mobility.subscriberManagement.TeleserviceCode;
+import org.restcomm.protocols.ss7.map.api.service.sms.CorrelationID;
+import com.mobius.software.common.dal.timers.TaskCallback;
+import org.restcomm.protocols.ss7.map.api.MAPApplicationContext;
+import org.restcomm.protocols.ss7.map.api.MAPApplicationContextName;
+import org.restcomm.protocols.ss7.map.api.MAPApplicationContextVersion;
+import org.restcomm.protocols.ss7.sccp.parameter.SccpAddress;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * Handles SRI-SM (SendRoutingInfoForSM) requests from NATS, creates MAP requests, and sends them over SS7.
@@ -21,6 +42,8 @@ public class SriMessageHandler implements SS7NatsSubscriber.MessageHandler<MapSr
 
     private final MAPStack mapStack;
     private final EventPublisher eventPublisher;
+    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+
 
     public SriMessageHandler(MAPStack mapStack, EventPublisher eventPublisher) {
         this.mapStack = mapStack;
@@ -38,26 +61,70 @@ public class SriMessageHandler implements SS7NatsSubscriber.MessageHandler<MapSr
             }
 
             MAPProvider mapProvider = mapStack.getProvider();
+            MAPParameterFactory mapParamFactory = mapProvider.getMAPParameterFactory();
+
+            // Create MAPDialog
+            MAPApplicationContext appCtx = MAPApplicationContext.getInstance(
+                MAPApplicationContextName.shortMsgGatewayContext,
+                MAPApplicationContextVersion.version2);
+
+            // Dummy SCCP addresses
+            SccpAddress origAddress = null;
+            SccpAddress destAddress = null;
+            AddressString origReference = null;
+            AddressString destReference = null;
+            int networkId = 1;
+
             MAPDialogSms mapDialog = mapProvider.getMAPServiceSms().createNewDialog(
-                MAPDialog.MAPDialogueType.ASYNCHRONOUS_CLIENT_SRI_SM);
+                appCtx, origAddress, origReference, destAddress, destReference, networkId);
             
-            SendRoutingInfoForSMRequest sriRequest = mapDialog.newSendRoutingInfoForSMRequest();
-            ISDNAddressString destinationMsisdn = mapProvider.getMAPParameterFactory().createISDNAddressString(
-                msisdn, ISDNAddressString.AddressNature.INTERNATIONAL_NUMBER, ISDNAddressString.NumberingPlan.ISDN);
-            sriRequest.setMsisdn(destinationMsisdn);
+            ISDNAddressString destinationMsisdn = mapParamFactory.createISDNAddressString(
+                AddressNature.international_number, NumberingPlan.ISDN, msisdn);
 
-            // Set correlation ID for later response handling
-            mapDialog.setUserObject(sriMessage.getCorrelationId()); // Store NATS correlation ID in MAP Dialog User Object
+            // Construct other parameters for addSendRoutingInfoForSMRequest
+            boolean smRpPri = false; 
+            AddressString serviceCentreAddress = null; 
+            MAPExtensionContainer extensionContainer = null;
+            boolean gprsSupportIndicator = false;
+            SM_RP_MTI smRpMti = null;
+            SM_RP_SMEA smRpSmea = null;
+            SMDeliveryNotIntended smDeliveryNotIntended = null;
+            boolean ipSmGwGuidanceIndicator = false;
+            IMSI imsi = null;
+            boolean t4TriggerIndicator = false;
+            boolean singleAttemptDelivery = false;
+            TeleserviceCode teleservice = null;
+            CorrelationID correlationID = null;
 
-            mapDialog.add(sriRequest);
-            mapDialog.send();
+            // Add the SRI-SM request to the dialog
+            mapDialog.addSendRoutingInfoForSMRequest(destinationMsisdn, smRpPri, serviceCentreAddress, 
+                                                     extensionContainer, gprsSupportIndicator, smRpMti, 
+                                                     smRpSmea, smDeliveryNotIntended, ipSmGwGuidanceIndicator, 
+                                                     imsi, t4TriggerIndicator, singleAttemptDelivery, 
+                                                     teleservice, correlationID);
+            
+            // Set correlation ID for later response handling using wrapper
+            mapDialog.setUserObject(new CorrelationIdWrapper(sriMessage.getCorrelationId()));
+
+            // Send the dialog
+            mapDialog.send(new TaskCallback<Exception>() {
+                @Override
+                public void onSuccess() {
+                    logger.info("MAP dialog for MSISDN {} sent successfully.", msisdn);
+                }
+
+                @Override
+                public void onError(Exception e) {
+                    logger.error("Error sending MAP dialog for MSISDN {}: {}", msisdn, e.getMessage(), e);
+                    publishFailureResponse(sriMessage.getCorrelationId(), sriMessage.getMessageId(), e.getMessage());
+                }
+            });
 
             logger.info("Sent SRI-SM request for MSISDN: {} over SS7. DialogId: {} [CorrId: {}]",
                 msisdn, mapDialog.getLocalDialogId(), sriMessage.getCorrelationId());
 
-        } catch (Exception e) {
+        } catch (MAPException | IllegalArgumentException e) {
             logger.error("Error sending SRI-SM request for MSISDN: {}", sriMessage.getMsisdn(), e);
-            // Publish failure response to NATS
             publishFailureResponse(sriMessage.getCorrelationId(), sriMessage.getMessageId(), e.getMessage());
         }
     }
