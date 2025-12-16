@@ -1,0 +1,30 @@
+{{- if .Values.monitoring.prometheus.alertRules.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "ss7-ha-gateway.fullname" . }}-alerts
+  labels:
+    {{- include "ss7-ha-gateway.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: {{ include "ss7-ha-gateway.fullname" . }}
+      rules:
+        {{- range .Values.monitoring.prometheus.alertRules.critical }}
+        - alert: {{ .alert }}
+          expr: {{ .expr }}
+          for: {{ .for }}
+          labels:
+            {{- toYaml .labels | nindent 12 }}
+          annotations:
+            {{- toYaml .annotations | nindent 12 }}
+        {{- end }}
+        {{- range .Values.monitoring.prometheus.alertRules.warning }}
+        - alert: {{ .alert }}
+          expr: {{ .expr }}
+          for: {{ .for }}
+          labels:
+            {{- toYaml .labels | nindent 12 }}
+          annotations:
+            {{- toYaml .annotations | nindent 12 }}
+        {{- end }}
+{{- end }}

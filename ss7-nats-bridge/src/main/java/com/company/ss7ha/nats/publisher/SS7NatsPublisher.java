@@ -31,12 +31,78 @@ public class SS7NatsPublisher {
     private static final String SUBJECT_MT_SMS_RESP = "map.mt.sms.response";
     private static final String SUBJECT_SRI_RESP = "map.sri.response";
     private static final String SUBJECT_CHECK_IMEI_REQ = "eir.v1.check.request";
+    private static final String SUBJECT_OPS_EVENTS_PREFIX = "ops.events.";
 
     public SS7NatsPublisher(String natsUrl) {
         this.natsUrl = natsUrl != null ? natsUrl : "nats://localhost:4222";
         this.objectMapper = new ObjectMapper();
         objectMapper.registerModule(new JavaTimeModule());
         objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+    }
+
+    /**
+     * Publish an Operational Event (Alarm, Audit, Log) for AI Agent Ingestion.
+     * Compliant with AI_OPERATIONS_SPEC.md
+     *
+     * @param code The standardized event code (e.g., EVT-CRIT-001)
+     * @param severity INFO, WARNING, or CRITICAL
+     * @param message Human-readable description
+     * @param details Contextual details (e.g., assocId, peerIp)
+     */
+    public void publishOpsEvent(String code, String severity, String message, java.util.Map<String, Object> details) {
+        Connection natsConnection = NatsConnectionManager.getInstance().getConnection();
+        if (natsConnection == null || natsConnection.getStatus() != Connection.Status.CONNECTED) {
+            logger.warn("Cannot publish Ops Event {}, NATS not connected", code);
+            return; // Fail safe, don't throw exception for logging
+        }
+
+        try {
+            OpsEvent event = new OpsEvent();
+            event.eventId = java.util.UUID.randomUUID().toString();
+            event.timestamp = java.time.Instant.now().toString();
+            event.type = severity.equals("CRITICAL") || severity.equals("WARNING") ? "ALARM" : "AUDIT";
+            event.code = code;
+            event.severity = severity;
+            event.source = new OpsEvent.Source(
+                System.getenv("NODE_ID") != null ? System.getenv("NODE_ID") : "unknown-node",
+                "ss7-gateway"
+            );
+            event.details = new java.util.LinkedHashMap<>();
+            event.details.put("message", message);
+            if (details != null) {
+                event.details.putAll(details);
+            }
+
+            byte[] data = objectMapper.writeValueAsBytes(event);
+            String subject = SUBJECT_OPS_EVENTS_PREFIX + code;
+            natsConnection.publish(subject, data);
+
+            logger.debug("Published Ops Event: {} ({})", code, subject);
+
+        } catch (Exception e) {
+            logger.error("Failed to publish Ops Event: " + code, e);
+        }
+    }
+
+    // Inner DTO for AI Operations Spec
+    private static class OpsEvent {
+        public String eventId;
+        public String timestamp;
+        public String type;
+        public String code;
+        public String severity;
+        public Source source;
+        public java.util.Map<String, Object> details;
+
+        public static class Source {
+            public String nodeId;
+            public String component;
+
+            public Source(String nodeId, String component) {
+                this.nodeId = nodeId;
+                this.component = component;
+            }
+        }
     }
 
     /**

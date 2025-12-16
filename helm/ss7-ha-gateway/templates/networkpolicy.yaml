@@ -1,0 +1,60 @@
+{{- if .Values.k8s.networkPolicy.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "ss7-ha-gateway.fullname" . }}-network-policy
+  labels:
+    {{- include "ss7-ha-gateway.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "ss7-ha-gateway.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow SCTP from trusted IPs
+    - from:
+        {{- range .Values.k8s.networkPolicy.sctpTrustedIPs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+      ports:
+        - protocol: SCTP
+          port: 2905
+    # Allow metrics scraping from Prometheus
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring # Assumes Prometheus is in 'monitoring' namespace
+      ports:
+        - protocol: TCP
+          port: 9090
+    # Allow health checks from Kubernetes system
+    - from:
+        - ipBlock:
+            cidr: {{ .Values.config.app.healthCheck.kubernetesCidr | default "10.0.0.0/8" }} # Default K8s service network
+      ports:
+        - protocol: TCP
+          port: {{ .Values.config.app.apiPort }} # Health Check Port
+  egress:
+    # Allow NATS connections
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: nats # Assumes NATS pods have this label
+      ports:
+        - protocol: TCP
+          port: 4222
+    # Allow DNS (to kube-dns in kube-system namespace usually)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+{{- end -}}

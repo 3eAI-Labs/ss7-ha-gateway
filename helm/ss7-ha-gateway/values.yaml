@@ -1,0 +1,247 @@
+# Default values for ss7-ha-gateway.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 3
+
+image:
+  repository: ss7-ha-gateway
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: "0.2.0"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+    add:
+      - NET_ADMIN # Required for SCTP
+
+resources:
+  # We usually recommend not to specify default resources for production environments.
+  # For production deployments, adjust resources based on your traffic volume.
+  requests:
+    cpu: 1000m
+    memory: 2Gi
+  limits:
+    cpu: 2000m
+    memory: 4Gi
+
+autoscaling:
+  enabled: false
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+service:
+  type: ClusterIP
+  ports:
+    - name: m3ua
+      protocol: SCTP
+      port: 2905
+      targetPort: 2905
+    - name: metrics
+      protocol: TCP
+      port: 9090
+      targetPort: 9090
+    - name: health
+      protocol: TCP
+      port: 8080
+      targetPort: 8080
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: chart-example.local
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls: []
+  #  - secretName: chart-example-tls
+  #    hosts:
+  #      - chart-example.local
+
+# -- Configuration for the SS7 HA Gateway application --
+config:
+  # SS7 Stack Configuration (These values are loaded from configmap 'ss7-gateway-config')
+  ss7:
+    m3ua:
+      name: M3UA-STACK
+      localHost: 0.0.0.0
+      localPort: 2905
+      # remoteHost: "10.0.0.100" # Needs to be defined based on your SS7 network
+      # remotePort: 2905
+      routingContext: 100
+      aspName: ASP1
+      asName: AS1
+    sccp:
+      name: SCCP-STACK
+      localPc: 1 # Your Point Code
+      localSsn: 8 # Your Subsystem Number (8=MSC)
+      localGt: "123456789" # Your Global Title
+      networkIndicator: NATIONAL
+    tcap:
+      name: TCAP-STACK
+      dialogIdleTimeout: 60000
+      invokeTimeout: 30000
+      maxDialogs: 5000
+    map:
+      name: MAP-STACK
+      version: MAP_V3 # MAP_V1, MAP_V2, MAP_V3
+      smsEnabled: true
+      ussdEnabled: false
+      locationEnabled: false
+    cap:
+      enabled: true
+      version: CAP_V4
+      ssn: 146 # always 146 for CAMEL
+
+  # Application Configuration
+  app:
+    name: SS7-HA-Gateway
+    version: 0.2.0
+    # nodeId: "{{ .Release.Name }}-{{ .Release.Revision }}" # Overridden by POD_NAME via downward API
+    haMode: ACTIVE_ACTIVE # ACTIVE_STANDBY, ACTIVE_ACTIVE
+    eventsPublishEnabled: true
+    dialogPersistEnabled: true
+    dialogTtlSeconds: 600
+    healthCheck:
+      enabled: true
+      port: 8080
+      path: /health
+      intervalMs: 30000
+    apiPort: 8080 # Javalin REST API port
+
+  # JVM Options
+  javaOpts: "-Xms1g -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
+
+# -- NATS Configuration (This chart assumes NATS is deployed separately) --
+nats:
+  url: "nats://nats.ss7-ha-gateway.svc.cluster.local:4222"
+  queueGroup: "ss7-gateway-group-v2"
+  # Authentication (if enabled in NATS)
+  username: ""
+  password: ""
+
+# -- Kubernetes specific configurations --
+k8s:
+  namespace: ss7-ha-gateway
+  networkPolicy:
+    enabled: true
+    # List of trusted IPs for SCTP traffic (your STP/MSC IPs)
+    sctpTrustedIPs:
+      - 10.0.0.0/8 # Example: "10.0.0.100/32", "10.0.1.0/24"
+  # ServiceAccount specific (from 09-rbac.yaml)
+  rbac:
+    create: true
+    name: ss7-gateway
+    rules:
+      - apiGroups: [""]
+        resources: ["configmaps", "secrets", "pods"]
+        verbs: ["get", "list", "watch"]
+      - apiGroups: ["coordination.k8s.io"]
+        resources: ["leases"]
+        verbs: ["get", "list", "watch", "create", "update", "delete"]
+
+# -- Monitoring --
+monitoring:
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: 30s
+      path: /metrics
+    alertRules:
+      enabled: true
+      # Alerts from 08-monitoring.yaml
+      critical:
+        - alert: SS7GatewayDown
+          expr: up{job="ss7-ha-gateway", namespace="{{ .Release.Namespace }}"} == 0
+          for: 1m
+          labels: { severity: critical, alarm_id: SS7-CRIT-001 }
+          annotations: { summary: "SS7 Gateway instance {{ $labels.instance }} is down", description: "SS7 Gateway {{ $labels.instance }} has been down for more than 1 minute." }
+        - alert: SS7SCTPAssociationDown
+          expr: ss7_sctp_associations_active{job="ss7-ha-gateway", namespace="{{ .Release.Namespace }}"} == 0
+          for: 1m
+          labels: { severity: critical, alarm_id: SS7-CRIT-002 }
+          annotations: { summary: "SS7 Gateway SCTP association is down", description: "No active SCTP associations on {{ $labels.instance }}" }
+        - alert: SS7NATSDisconnected
+          expr: ss7_nats_connected{job="ss7-ha-gateway", namespace="{{ .Release.Namespace }}"} == 0
+          for: 30s
+          labels: { severity: critical, alarm_id: SS7-CRIT-003 }
+          annotations: { summary: "SS7 Gateway disconnected from NATS", description: "Instance {{ $labels.instance }} lost NATS connection" }
+        - alert: SS7DialogOverflow
+          expr: ss7_dialogs_active{job="ss7-ha-gateway", namespace="{{ .Release.Namespace }}"} / onfig_tcap_max_dialogs{job="ss7-ha-gateway", namespace="{{ .Release.Namespace }}"} > 0.95
+          for: 2m
+          labels: { severity: critical, alarm_id: SS7-CRIT-004 }
+          annotations: { summary: "SS7 Gateway dialog capacity near limit", description: "Instance {{ $labels.instance }} at {{ $value | humanizePercentage }} dialog capacity" }
+      warning:
+        - alert: SS7HighErrorRate
+          expr: rate(ss7_errors_total{job="ss7-ha-gateway", namespace="{{ .Release.Namespace }}"}[5m]) / rate(ss7_dialogs_created_total{job="ss7-ha-gateway", namespace="{{ .Release.Namespace }}"}[5m]) > 0.01
+          for: 5m
+          labels: { severity: warning, alarm_id: SS7-WARN-001 }
+          annotations: { summary: "High error rate on SS7 Gateway", description: "Error rate is {{ $value | humanizePercentage }} on {{ $labels.instance }}" }
+        - alert: SS7HighLatency
+          expr: histogram_quantile(0.99, rate(ss7_dialog_duration_seconds_bucket{job="ss7-ha-gateway", namespace="{{ .Release.Namespace }}"}[5m])) > 0.5
+          for: 5m
+          labels: { severity: warning, alarm_id: SS7-WARN-002 }
+          annotations: { summary: "High dialog latency on SS7 Gateway", description: "P99 latency is {{ $value | humanizeDuration }} on {{ $labels.instance }}" }
+        - alert: SS7HighMemoryUsage
+          expr: jvm_memory_used_bytes{area="heap", job="ss7-ha-gateway", namespace="{{ .Release.Namespace }}"} / jvm_memory_max_bytes{area="heap", job="ss7-ha-gateway", namespace="{{ .Release.Namespace }}"} > 0.8
+          for: 10m
+          labels: { severity: warning, alarm_id: SS7-WARN-003 }
+          annotations: { summary: "High memory usage on SS7 Gateway", description: "Heap usage is {{ $value | humanizePercentage }} on {{ $labels.instance }}" }
+
+# -- Secrets management --
+secrets:
+  # Enable if you want to create a Kubernetes Secret from values.
+  # Otherwise, assume secrets are pre-created.
+  create: false
+  natsUsername: ""
+  natsPassword: "" # Use `helm install --set secrets.natsPassword=YOUR_PASSWORD`
+
+# -- Pod Disruption Budget --
+pdb:
+  enabled: true
+  minAvailable: 2
+
+# -- Service specific settings --
+serviceMonitor:
+  enabled: true
+  interval: 30s
+  path: /metrics

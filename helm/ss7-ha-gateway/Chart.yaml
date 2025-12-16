@@ -1,0 +1,21 @@
+apiVersion: v2
+name: ss7-ha-gateway
+description: A Helm chart for deploying the SS7 HA Gateway on Kubernetes.
+type: application
+version: 0.2.0
+appVersion: "0.2.0"
+keywords:
+  - ss7
+  - telecom
+  - gateway
+  - nats
+  - map
+  - cap
+  - gprs
+  - sms
+home: https://www.3eai-labs.com
+sources:
+  - https://github.com/3eAI-Labs/ss7-ha-gateway
+maintainers:
+  - name: 3eAI-Labs
+    email: devops@3eai-labs.com

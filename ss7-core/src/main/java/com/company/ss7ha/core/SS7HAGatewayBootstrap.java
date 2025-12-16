@@ -33,6 +33,7 @@ public class SS7HAGatewayBootstrap {
     // HA components
     private EventPublisher eventPublisher;
     private MapSmsServiceListener smsServiceListener;
+    private com.company.ss7ha.core.listeners.CapServiceListener capServiceListener;
     private SS7NatsPublisher natsPublisher;
     private SS7NatsSubscriber natsSubscriber;
     private DialogStore dialogStore;
@@ -63,6 +64,7 @@ public class SS7HAGatewayBootstrap {
             // Initialize NATS and Listeners
             initializeNats();
             registerMapListeners();
+            registerCapListeners();
             
             // Start NATS Subscriber (Publisher started in initializeNats)
             if (natsSubscriber != null) {
@@ -135,6 +137,26 @@ public class SS7HAGatewayBootstrap {
         }
     }
 
+    private void registerCapListeners() {
+        logger.info("Registering CAP service listeners...");
+        try {
+            boolean publishEvents = Boolean.parseBoolean(config.getProperty("events.publish.enabled", "true"));
+            
+            org.restcomm.protocols.ss7.cap.api.CAPProvider capProvider = SS7StackManager.getInstance().getCapProvider();
+            
+            if (capProvider != null) {
+                capServiceListener = new com.company.ss7ha.core.listeners.CapServiceListener(eventPublisher, natsPublisher, publishEvents);
+                capProvider.getCAPServiceCircuitSwitchedCall().addCAPServiceListener(capServiceListener);
+                logger.info("CAP service listeners registered (v4 Circuit Switched Call)");
+            } else {
+                logger.info("CAP Provider is null or disabled, skipping listener registration");
+            }
+        } catch (Exception e) {
+            logger.error("Failed to register CAP listeners", e);
+            // Don't fail the whole startup for CAP, just log error
+        }
+    }
+
     private void initializeNats() {
         logger.info("Initializing NATS...");
         try {
@@ -156,6 +178,10 @@ public class SS7HAGatewayBootstrap {
             // Initialize NATS publisher (Uses NatsConnectionManager internally)
             natsPublisher = new SS7NatsPublisher(natsUrl);
             natsPublisher.start();
+            
+            // Wire publisher to Stack Manager for operational events
+            SS7StackManager.getInstance().setPublisher(natsPublisher);
+            
             logger.info("NATS Publisher initialized");
 
             // Initialize NATS subscriber (Uses NatsConnectionManager internally)
@@ -170,6 +196,16 @@ public class SS7HAGatewayBootstrap {
 
             SriMessageHandler sriHandler = new SriMessageHandler(mapStack, eventPublisher);
             natsSubscriber.setSriHandler(sriHandler);
+            
+            // Register CAP Command Handler if CAP is enabled
+            org.restcomm.protocols.ss7.cap.api.CAPProvider capProvider = SS7StackManager.getInstance().getCapProvider();
+            if (capProvider != null) {
+                com.company.ss7ha.core.handlers.CapMessageHandler capHandler = 
+                    new com.company.ss7ha.core.handlers.CapMessageHandler(capProvider, eventPublisher);
+                
+                natsSubscriber.setCapCommandHandler(capHandler::handleCommand);
+                logger.info("CAP Command Handler registered");
+            }
 
             logger.info("NATS Subscriber initialized with handlers");
         } catch (Exception e) {

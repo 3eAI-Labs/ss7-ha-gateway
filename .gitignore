@@ -126,3 +126,4 @@ storage/
 # Keep example configuration files
 !config/**/*.example
 !config/**/*.template
+blog/

@@ -38,10 +38,12 @@ public class SS7NatsSubscriber {
     // NATS subjects for subscribing to requests from SMSC
     private static final String SUBJECT_MT_SMS_REQ = "map.mt.sms.request";
     private static final String SUBJECT_SRI_REQ = "map.sri.request";
+    private static final String SUBJECT_CAP_CMD_REQ = "cap.command.>";
 
     // Message handlers (to be injected)
     private MessageHandler<MapSmsMessage> mtSmsHandler;
     private MessageHandler<MapSriMessage> sriHandler;
+    private MessageHandler<String> capCommandHandler;
 
     public SS7NatsSubscriber(String natsUrl, String queueGroup) {
         this.natsUrl = natsUrl != null ? natsUrl : "nats://localhost:4222";
@@ -86,6 +88,10 @@ public class SS7NatsSubscriber {
         // Subscribe to SRI requests (query HLR for routing info)
         dispatcher.subscribe(SUBJECT_SRI_REQ, queueGroup, this::handleSriRequest);
         logger.info("Subscribed to " + SUBJECT_SRI_REQ + " with queue group: " + queueGroup);
+        
+        // Subscribe to CAP commands (Connect, Continue, etc.)
+        dispatcher.subscribe(SUBJECT_CAP_CMD_REQ, queueGroup, this::handleCapCommand);
+        logger.info("Subscribed to " + SUBJECT_CAP_CMD_REQ + " with queue group: " + queueGroup);
     }
 
     /**
@@ -134,6 +140,28 @@ public class SS7NatsSubscriber {
             }
         });
     }
+    
+    /**
+     * Handle CAP command messages (Raw JSON)
+     */
+    private void handleCapCommand(Message msg) {
+        messageProcessorPool.submit(() -> {
+            try {
+                String jsonCommand = new String(msg.getData(), java.nio.charset.StandardCharsets.UTF_8);
+                
+                logger.debug("Received CAP command on subject: " + msg.getSubject());
+
+                if (capCommandHandler != null) {
+                    capCommandHandler.handle(jsonCommand);
+                } else {
+                    logger.warn("No CAP command handler registered");
+                }
+
+            } catch (Exception e) {
+                logger.error("Failed to process CAP command", e);
+            }
+        });
+    }
 
     /**
      * Check if subscriber is connected
@@ -179,6 +207,7 @@ public class SS7NatsSubscriber {
         if (dispatcher != null && NatsConnectionManager.getInstance().isConnected()) {
             dispatcher.unsubscribe(SUBJECT_MT_SMS_REQ);
             dispatcher.unsubscribe(SUBJECT_SRI_REQ);
+            dispatcher.unsubscribe(SUBJECT_CAP_CMD_REQ);
             // We do NOT close the connection here if it is shared, but assuming this stops the app:
             NatsConnectionManager.getInstance().close();
         }
@@ -191,6 +220,10 @@ public class SS7NatsSubscriber {
 
     public void setSriHandler(MessageHandler<MapSriMessage> handler) {
         this.sriHandler = handler;
+    }
+    
+    public void setCapCommandHandler(MessageHandler<String> handler) {
+        this.capCommandHandler = handler;
     }
 
     /**

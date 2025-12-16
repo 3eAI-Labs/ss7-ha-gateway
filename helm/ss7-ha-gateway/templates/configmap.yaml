@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ss7-ha-gateway.fullname" . }}-config
+  labels:
+    {{- include "ss7-ha-gateway.labels" . | nindent 4 }}
+data:
+  ss7-config.properties: |
+    # M3UA Configuration
+    m3ua.name={{ .Values.config.ss7.m3ua.name }}
+    m3ua.sctp.server.host={{ .Values.config.ss7.m3ua.localHost }}
+    m3ua.sctp.server.port={{ .Values.config.ss7.m3ua.localPort }}
+    m3ua.routing.context={{ .Values.config.ss7.m3ua.routingContext }}
+    m3ua.asp.name={{ .Values.config.ss7.m3ua.aspName }}
+    m3ua.as.name={{ .Values.config.ss7.m3ua.asName }}
+    {{- if .Values.config.ss7.m3ua.remoteHost }}
+    m3ua.sctp.remote.host={{ .Values.config.ss7.m3ua.remoteHost }}
+    {{- end }}
+    {{- if .Values.config.ss7.m3ua.remotePort }}
+    m3ua.sctp.remote.port={{ .Values.config.ss7.m3ua.remotePort }}
+    {{- end }}
+
+    # SCCP Configuration
+    sccp.name={{ .Values.config.ss7.sccp.name }}
+    sccp.local.pc={{ .Values.config.ss7.sccp.localPc }}
+    sccp.local.ssn={{ .Values.config.ss7.sccp.localSsn }}
+    sccp.local.gt={{ .Values.config.ss7.sccp.localGt }}
+    sccp.network.indicator={{ .Values.config.ss7.sccp.networkIndicator }}
+
+    # TCAP Configuration
+    tcap.name={{ .Values.config.ss7.tcap.name }}
+    tcap.dialog.idle.timeout={{ .Values.config.ss7.tcap.dialogIdleTimeout }}
+    tcap.invoke.timeout={{ .Values.config.ss7.tcap.invokeTimeout }}
+    tcap.max.dialogs={{ .Values.config.ss7.tcap.maxDialogs }}
+
+    # MAP Configuration
+    map.name={{ .Values.config.ss7.map.name }}
+    map.version={{ .Values.config.ss7.map.version }}
+    map.sms.enabled={{ .Values.config.ss7.map.smsEnabled }}
+    map.ussd.enabled={{ .Values.config.ss7.map.ussdEnabled }}
+    map.location.enabled={{ .Values.config.ss7.map.locationEnabled }}
+
+    # CAP Configuration
+    cap.enabled={{ .Values.config.ss7.cap.enabled }}
+    cap.version={{ .Values.config.ss7.cap.version }}
+    cap.ssn={{ .Values.config.ss7.cap.ssn }}
+
+  application.properties: |
+    # Application Identity
+    application.name={{ .Values.config.app.name }}
+    application.version={{ .Values.config.app.version }}
+    # nodeId is set via Downward API
+    ha.mode={{ .Values.config.app.haMode }}
+
+    # NATS Configuration
+    nats.server.url={{ .Values.nats.url }}
+    nats.queue.group={{ .Values.nats.queueGroup }}
+    nats.jetstream.enabled={{ .Values.config.app.dialogPersistEnabled }}
+    nats.jetstream.bucket.name=ss7-dialog-state # Hardcoded for now
+
+    # Dialog Persistence
+    dialog.persist.enabled={{ .Values.config.app.dialogPersistEnabled }}
+    dialog.ttl.seconds={{ .Values.config.app.dialogTtlSeconds }}
+
+    # Event Publishing
+    events.publish.enabled={{ .Values.config.app.eventsPublishEnabled }}
+
+    # Health Check
+    health.check.enabled={{ .Values.config.app.healthCheck.enabled }}
+    health.check.port={{ .Values.config.app.healthCheck.port }}
+    health.check.path={{ .Values.config.app.healthCheck.path }}
+    health.check.interval.ms={{ .Values.config.app.healthCheck.intervalMs }}

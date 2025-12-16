@@ -1,0 +1,148 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ss7-ha-gateway.fullname" . }}
+  labels:
+    {{- include "ss7-ha-gateway.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "ss7-ha-gateway.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "ss7-ha-gateway.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "ss7-ha-gateway.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: m3ua
+              containerPort: 2905
+              protocol: SCTP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+            - name: health
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.config.app.healthCheck.path }}
+              port: {{ .Values.config.app.healthCheck.port }}
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.config.app.healthCheck.path }}
+              port: {{ .Values.config.app.healthCheck.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: NATS_URL
+              value: {{ .Values.nats.url | quote }}
+            - name: NATS_QUEUE_GROUP
+              value: {{ .Values.nats.queueGroup | quote }}
+            - name: JAVA_OPTS
+              value: {{ .Values.config.javaOpts | quote }}
+            - name: HA_MODE
+              value: {{ .Values.config.app.haMode | quote }}
+            - name: EVENTS_PUBLISH_ENABLED
+              value: {{ .Values.config.app.eventsPublishEnabled | quote }}
+            - name: DIALOG_PERSIST_ENABLED
+              value: {{ .Values.config.app.dialogPersistEnabled | quote }}
+            - name: DIALOG_TTL_SECONDS
+              value: {{ .Values.config.app.dialogTtlSeconds | quote }}
+            - name: API_PORT
+              value: {{ .Values.config.app.apiPort | quote }}
+            # SS7 Configuration values from ConfigMap
+            - name: SS7_M3UA_LOCAL_HOST
+              value: {{ .Values.config.ss7.m3ua.localHost | quote }}
+            - name: SS7_M3UA_LOCAL_PORT
+              value: {{ .Values.config.ss7.m3ua.localPort | quote }}
+            - name: SS7_M3UA_ROUTING_CONTEXT
+              value: {{ .Values.config.ss7.m3ua.routingContext | quote }}
+            - name: SS7_SCCP_LOCAL_PC
+              value: {{ .Values.config.ss7.sccp.localPc | quote }}
+            - name: SS7_SCCP_LOCAL_SSN
+              value: {{ .Values.config.ss7.sccp.localSsn | quote }}
+            - name: SS7_SCCP_LOCAL_GT
+              value: {{ .Values.config.ss7.sccp.localGt | quote }}
+            - name: SS7_SCCP_NETWORK_INDICATOR
+              value: {{ .Values.config.ss7.sccp.networkIndicator | quote }}
+            - name: SS7_CAP_ENABLED
+              value: {{ .Values.config.ss7.cap.enabled | quote }}
+            - name: SS7_CAP_VERSION
+              value: {{ .Values.config.ss7.cap.version | quote }}
+            - name: SS7_CAP_SSN
+              value: {{ .Values.config.ss7.cap.ssn | quote }}
+            
+            {{- if .Values.nats.username }}
+            - name: NATS_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ss7-ha-gateway.fullname" . }}-nats-secrets
+                  key: username
+            {{- end }}
+            {{- if .Values.nats.password }}
+            - name: NATS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ss7-ha-gateway.fullname" . }}-nats-secrets
+                  key: password
+            {{- end }}
+
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "ss7-ha-gateway.fullname" . }}-config
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,471 @@
+---
+# Source: ss7-ha-gateway/templates/networkpolicy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: my-release-ss7-ha-gateway-network-policy
+  labels:
+    helm.sh/chart: ss7-ha-gateway-0.1.0
+        
+    app.kubernetes.io/name: ss7-ha-gateway
+    app.kubernetes.io/instance: my-release
+    app.kubernetes.io/version: "1.3.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ss7-ha-gateway
+      app.kubernetes.io/instance: my-release
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow SCTP from trusted IPs
+    - from:
+        - ipBlock:
+            cidr: 10.0.0.0/8
+      ports:
+        - protocol: SCTP
+          port: 2905
+    # Allow metrics scraping from Prometheus
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring # Assumes Prometheus is in 'monitoring' namespace
+      ports:
+        - protocol: TCP
+          port: 9090
+    # Allow health checks from Kubernetes system
+    - from:
+        - ipBlock:
+            cidr: 10.0.0.0/8 # Default K8s service network
+      ports:
+        - protocol: TCP
+          port: 8080 # Health Check Port
+  egress:
+    # Allow NATS connections
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: nats # Assumes NATS pods have this label
+      ports:
+        - protocol: TCP
+          port: 4222
+    # Allow DNS (to kube-dns in kube-system namespace usually)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+---
+# Source: ss7-ha-gateway/templates/pdb.yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: my-release-ss7-ha-gateway-pdb
+  labels:
+    helm.sh/chart: ss7-ha-gateway-0.1.0
+        
+    app.kubernetes.io/name: ss7-ha-gateway
+    app.kubernetes.io/instance: my-release
+    app.kubernetes.io/version: "1.3.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ss7-ha-gateway
+      app.kubernetes.io/instance: my-release
+---
+# Source: ss7-ha-gateway/templates/rbac.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: my-release-ss7-ha-gateway
+  labels:
+    helm.sh/chart: ss7-ha-gateway-0.1.0
+        
+    app.kubernetes.io/name: ss7-ha-gateway
+    app.kubernetes.io/instance: my-release
+    app.kubernetes.io/version: "1.3.0"
+    app.kubernetes.io/managed-by: Helm
+---
+# Source: ss7-ha-gateway/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: my-release-ss7-ha-gateway-config
+  labels:
+    helm.sh/chart: ss7-ha-gateway-0.1.0
+        
+    app.kubernetes.io/name: ss7-ha-gateway
+    app.kubernetes.io/instance: my-release
+    app.kubernetes.io/version: "1.3.0"
+    app.kubernetes.io/managed-by: Helm
+data:
+  ss7-config.properties: |
+    # M3UA Configuration
+    m3ua.name=M3UA-STACK
+    m3ua.sctp.server.host=0.0.0.0
+    m3ua.sctp.server.port=2905
+    m3ua.routing.context=100
+    m3ua.asp.name=ASP1
+    m3ua.as.name=AS1
+
+    # SCCP Configuration
+    sccp.name=SCCP-STACK
+    sccp.local.pc=1
+    sccp.local.ssn=8
+    sccp.local.gt=1.23456789e+08
+    sccp.network.indicator=NATIONAL
+
+    # TCAP Configuration
+    tcap.name=TCAP-STACK
+    tcap.dialog.idle.timeout=60000
+    tcap.invoke.timeout=30000
+    tcap.max.dialogs=5000
+
+    # MAP Configuration
+    map.name=MAP-STACK
+    map.version=MAP_V3
+    map.sms.enabled=true
+    map.ussd.enabled=false
+    map.location.enabled=false
+
+    # CAP Configuration
+    cap.enabled=true
+    cap.version=CAP_V4
+    cap.ssn=146
+
+  application.properties: |
+    # Application Identity
+    application.name=SS7-HA-Gateway
+    application.version=2.0.0
+    # nodeId is set via Downward API
+    ha.mode=ACTIVE_ACTIVE
+
+    # NATS Configuration
+    nats.server.url=nats://nats.ss7-ha-gateway.svc.cluster.local:4222
+    nats.queue.group=ss7-gateway-group-v2
+    nats.jetstream.enabled=true
+    nats.jetstream.bucket.name=ss7-dialog-state # Hardcoded for now
+
+    # Dialog Persistence
+    dialog.persist.enabled=true
+    dialog.ttl.seconds=600
+
+    # Event Publishing
+    events.publish.enabled=true
+
+    # Health Check
+    health.check.enabled=true
+    health.check.port=8080
+    health.check.path=/health
+    health.check.interval.ms=30000
+---
+# Source: ss7-ha-gateway/templates/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: my-release-ss7-ha-gateway-role
+  labels:
+    helm.sh/chart: ss7-ha-gateway-0.1.0
+        
+    app.kubernetes.io/name: ss7-ha-gateway
+    app.kubernetes.io/instance: my-release
+    app.kubernetes.io/version: "1.3.0"
+    app.kubernetes.io/managed-by: Helm
+rules:
+  - apiGroups:
+    - ""
+    resources:
+    - configmaps
+    - secrets
+    - pods
+    verbs:
+    - get
+    - list
+    - watch
+  - apiGroups:
+    - coordination.k8s.io
+    resources:
+    - leases
+    verbs:
+    - get
+    - list
+    - watch
+    - create
+    - update
+    - delete
+---
+# Source: ss7-ha-gateway/templates/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: my-release-ss7-ha-gateway-rolebinding
+  labels:
+    helm.sh/chart: ss7-ha-gateway-0.1.0
+        
+    app.kubernetes.io/name: ss7-ha-gateway
+    app.kubernetes.io/instance: my-release
+    app.kubernetes.io/version: "1.3.0"
+    app.kubernetes.io/managed-by: Helm
+subjects:
+  - kind: ServiceAccount
+    name: my-release-ss7-ha-gateway
+    namespace: default
+roleRef:
+  kind: Role
+  name: my-release-ss7-ha-gateway-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# Source: ss7-ha-gateway/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-release-ss7-ha-gateway
+  labels:
+    helm.sh/chart: ss7-ha-gateway-0.1.0
+        
+    app.kubernetes.io/name: ss7-ha-gateway
+    app.kubernetes.io/instance: my-release
+    app.kubernetes.io/version: "1.3.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  type: ClusterIP
+  ports:
+    - name: m3ua
+      protocol: SCTP
+      port: 2905
+      targetPort: 2905
+    - name: metrics
+      protocol: TCP
+      port: 9090
+      targetPort: 9090
+    - name: health
+      protocol: TCP
+      port: 8080
+      targetPort: 8080
+  selector:
+    app.kubernetes.io/name: ss7-ha-gateway
+    app.kubernetes.io/instance: my-release
+---
+# Source: ss7-ha-gateway/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-release-ss7-ha-gateway
+  labels:
+    helm.sh/chart: ss7-ha-gateway-0.1.0
+        
+    app.kubernetes.io/name: ss7-ha-gateway
+    app.kubernetes.io/instance: my-release
+    app.kubernetes.io/version: "1.3.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ss7-ha-gateway
+      app.kubernetes.io/instance: my-release
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ss7-ha-gateway
+        app.kubernetes.io/instance: my-release
+    spec:
+      serviceAccountName: my-release-ss7-ha-gateway
+      securityContext:
+        {}
+      containers:
+        - name: ss7-ha-gateway
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              add:
+              - NET_ADMIN
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsGroup: 1000
+            runAsNonRoot: true
+            runAsUser: 1000
+          image: "ss7-ha-gateway:1.3.0"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: m3ua
+              containerPort: 2905
+              protocol: SCTP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+            - name: health
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            limits:
+              cpu: 2000m
+              memory: 4Gi
+            requests:
+              cpu: 1000m
+              memory: 2Gi
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: NATS_URL
+              value: "nats://nats.ss7-ha-gateway.svc.cluster.local:4222"
+            - name: NATS_QUEUE_GROUP
+              value: "ss7-gateway-group-v2"
+            - name: JAVA_OPTS
+              value: "-Xms1g -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
+            - name: HA_MODE
+              value: "ACTIVE_ACTIVE"
+            - name: EVENTS_PUBLISH_ENABLED
+              value: "true"
+            - name: DIALOG_PERSIST_ENABLED
+              value: "true"
+            - name: DIALOG_TTL_SECONDS
+              value: "600"
+            - name: API_PORT
+              value: "8080"
+            # SS7 Configuration values from ConfigMap
+            - name: SS7_M3UA_LOCAL_HOST
+              value: "0.0.0.0"
+            - name: SS7_M3UA_LOCAL_PORT
+              value: "2905"
+            - name: SS7_M3UA_ROUTING_CONTEXT
+              value: "100"
+            - name: SS7_SCCP_LOCAL_PC
+              value: "1"
+            - name: SS7_SCCP_LOCAL_SSN
+              value: "8"
+            - name: SS7_SCCP_LOCAL_GT
+              value: "1.23456789e+08"
+            - name: SS7_SCCP_NETWORK_INDICATOR
+              value: "NATIONAL"
+            - name: SS7_CAP_ENABLED
+              value: "true"
+            - name: SS7_CAP_VERSION
+              value: "CAP_V4"
+            - name: SS7_CAP_SSN
+              value: "146"
+
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: my-release-ss7-ha-gateway-config
+        - name: tmp
+          emptyDir: {}
+---
+# Source: ss7-ha-gateway/templates/prometheusrules.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: my-release-ss7-ha-gateway-alerts
+  labels:
+    helm.sh/chart: ss7-ha-gateway-0.1.0
+        
+    app.kubernetes.io/name: ss7-ha-gateway
+    app.kubernetes.io/instance: my-release
+    app.kubernetes.io/version: "1.3.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  groups:
+    - name: my-release-ss7-ha-gateway
+      rules:
+        - alert: SS7GatewayDown
+          expr: up{job="ss7-ha-gateway", namespace="{{ .Release.Namespace }}"} == 0
+          for: 1m
+          labels:
+            alarm_id: SS7-CRIT-001
+            severity: critical
+          annotations:
+            description: SS7 Gateway {{ $labels.instance }} has been down for more than 1 minute.
+            summary: SS7 Gateway instance {{ $labels.instance }} is down
+        - alert: SS7SCTPAssociationDown
+          expr: ss7_sctp_associations_active{job="ss7-ha-gateway", namespace="{{ .Release.Namespace }}"} == 0
+          for: 1m
+          labels:
+            alarm_id: SS7-CRIT-002
+            severity: critical
+          annotations:
+            description: No active SCTP associations on {{ $labels.instance }}
+            summary: SS7 Gateway SCTP association is down
+        - alert: SS7NATSDisconnected
+          expr: ss7_nats_connected{job="ss7-ha-gateway", namespace="{{ .Release.Namespace }}"} == 0
+          for: 30s
+          labels:
+            alarm_id: SS7-CRIT-003
+            severity: critical
+          annotations:
+            description: Instance {{ $labels.instance }} lost NATS connection
+            summary: SS7 Gateway disconnected from NATS
+        - alert: SS7DialogOverflow
+          expr: ss7_dialogs_active{job="ss7-ha-gateway", namespace="{{ .Release.Namespace }}"} / onfig_tcap_max_dialogs{job="ss7-ha-gateway", namespace="{{ .Release.Namespace }}"} > 0.95
+          for: 2m
+          labels:
+            alarm_id: SS7-CRIT-004
+            severity: critical
+          annotations:
+            description: Instance {{ $labels.instance }} at {{ $value | humanizePercentage }}
+              dialog capacity
+            summary: SS7 Gateway dialog capacity near limit
+        - alert: SS7HighErrorRate
+          expr: rate(ss7_errors_total{job="ss7-ha-gateway", namespace="{{ .Release.Namespace }}"}[5m]) / rate(ss7_dialogs_created_total{job="ss7-ha-gateway", namespace="{{ .Release.Namespace }}"}[5m]) > 0.01
+          for: 5m
+          labels:
+            alarm_id: SS7-WARN-001
+            severity: warning
+          annotations:
+            description: Error rate is {{ $value | humanizePercentage }} on {{ $labels.instance
+              }}
+            summary: High error rate on SS7 Gateway
+        - alert: SS7HighLatency
+          expr: histogram_quantile(0.99, rate(ss7_dialog_duration_seconds_bucket{job="ss7-ha-gateway", namespace="{{ .Release.Namespace }}"}[5m])) > 0.5
+          for: 5m
+          labels:
+            alarm_id: SS7-WARN-002
+            severity: warning
+          annotations:
+            description: P99 latency is {{ $value | humanizeDuration }} on {{ $labels.instance
+              }}
+            summary: High dialog latency on SS7 Gateway
+        - alert: SS7HighMemoryUsage
+          expr: jvm_memory_used_bytes{area="heap", job="ss7-ha-gateway", namespace="{{ .Release.Namespace }}"} / jvm_memory_max_bytes{area="heap", job="ss7-ha-gateway", namespace="{{ .Release.Namespace }}"} > 0.8
+          for: 10m
+          labels:
+            alarm_id: SS7-WARN-003
+            severity: warning
+          annotations:
+            description: Heap usage is {{ $value | humanizePercentage }} on {{ $labels.instance
+              }}
+            summary: High memory usage on SS7 Gateway
