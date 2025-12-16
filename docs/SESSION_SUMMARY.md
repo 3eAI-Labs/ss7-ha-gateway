@@ -37,3 +37,38 @@
 - **Integration Testing:** Perform end-to-end tests with a real SS7 simulator (e.g., Seagull) to validate the Hex Passthrough logic.
 - **Performance Tuning:** Benchmark the `HexToBytes` conversion under high load.
 - **Plugin System:** Implement dynamic JAR loading for `MessageHandler` plugins.
+
+---
+
+# Session Summary - 17 Dec 2025
+
+## ✅ Accomplishments
+
+### 1. Project Build & API Compatibility
+- **JSS7 Library Version Update:** Successfully adapted the codebase to be compatible with `corsac-jss7` library version `10.0.58`, resolving numerous compilation errors.
+- **GPRS Functionality Restoration:** Fully restored GPRS-related code in Mappers, Handlers, and Listeners that was previously failing to compile. Identified and utilized correct GPRS classes and methods (e.g., `InitialDpGprsRequest`).
+- **Mapper Refactoring (`CapJsonMapper` & `MapJsonMapper`):**
+    - Corrected getter method names for various requests (e.g., `getImei()` instead of `getIMEI()`, `getMSClassmark2()` instead of `getMsClassmark2()`).
+    - Implemented `hexToInt` helper for converting hexadecimal byte arrays to integers for parameters requiring `int` types in factory methods.
+    - Simplified `createFromHex` for complex ISUP/CommonApp types by temporarily removing direct byte array conversions, with a warning that full "Hex Passthrough" for these types requires dedicated decoding logic not present in the current API.
+- **Handler Refactoring (`CapMessageHandler`, `ConnectHandler`, `ReleaseCallHandler`):**
+    - Corrected the usage of `CAPDialog` by casting it to specific types like `CAPDialogCircuitSwitchedCall`, `CAPDialogSms`, and `CAPDialogGprs` before invoking service methods.
+    - Updated method calls to use the dialog objects directly (e.g., `dialog.addConnectRequest(...)` instead of `service.addConnectRequest(...)`).
+    - Adjusted method signatures and parameter passing (e.g., using `null`s for optional complex objects and `0` for integer defaults) to match the exact requirements of the JSS7 10.x API.
+- **Listener Refactoring (`CapServiceListener` & `GenericMapServiceListener`):**
+    - Added missing interface methods required by `CAPServiceListener`, `CAPDialogListener`, `MAPServiceSmsListener`, and `MAPServiceMobilityListener` interfaces.
+    - Corrected method signatures, including the tricky `onAnyTimeInterrogationResponse` and `onRegisterPasswordResponse` methods.
+    - Ensured proper implementation of dialog-related listener methods for both CAP and MAP.
+
+### 2. Versioning & Dockerization
+- **Project Version Update:** Updated the Maven project version from `1.3.0` to `0.2.0` across all `pom.xml` files using `mvn versions:set`.
+- **Dockerfile Update:** Modified the `Dockerfile` to reference the newly versioned JAR artifact (`ss7-core-0.2.0.jar`).
+- **Docker Image Build:** Successfully built the Docker image `ss7-ha-gateway:v0.2.0`.
+
+## 🚧 Remaining Tasks (Hex Passthrough & Advanced Decoding)
+- The current implementation of `CapJsonMapper.createFromHex` still has limitations for complex ISUP/CommonApp parameters where the API does not provide direct methods to construct objects from raw byte arrays. This requires implementing custom ISUP decoding logic for "Hex Passthrough" to be fully functional.
+
+## 🔜 Next Steps
+- Push the newly built Docker image `ss7-ha-gateway:v0.2.0` to `registry.3eai-labs.com:32000`.
+- Develop dedicated ISUP/CommonApp decoding logic for `CapJsonMapper.createFromHex` to fully enable "Hex Passthrough" for all complex parameters.
+- Conduct thorough integration testing with a real SS7 simulator to validate all re-enabled and newly adapted functionalities.

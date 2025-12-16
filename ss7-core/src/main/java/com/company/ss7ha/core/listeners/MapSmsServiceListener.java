@@ -4,6 +4,7 @@ import com.company.ss7ha.core.events.EventPublisher;
 import com.company.ss7ha.core.handlers.CorrelationIdWrapper; // Added
 import com.company.ss7ha.core.model.DialogState;
 import com.company.ss7ha.core.store.DialogStore;
+import com.company.ss7ha.messages.MapSmsMessage;
 import com.company.ss7ha.messages.MapSriMessage;
 import com.company.ss7ha.messages.SS7Message;
 import com.company.ss7ha.nats.publisher.SS7NatsPublisher;
@@ -120,6 +121,38 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
             if (persistDialogs && dialogStore != null) {
                 persistDialogState(dialog, "MT_FORWARD_SM", invokeId);
             }
+
+            // LOOPBACK LOGIC: Publish MT as MO to complete the E2E test loop
+            if (publishEvents && natsPublisher != null) {
+                MapSmsMessage msg = new MapSmsMessage();
+                msg.setMessageId(java.util.UUID.randomUUID().toString());
+                msg.setDialogId(dialogId);
+                msg.setInvokeId(invokeId);
+                msg.setDirection(SS7Message.MessageDirection.INBOUND);
+                
+                if (request.getSM_RP_OA() != null) {
+                    msg.setSender(request.getSM_RP_OA().getAddress());
+                } else {
+                    msg.setSender("UNKNOWN");
+                }
+                
+                if (request.getSM_RP_DA() != null) {
+                    // Try to get IMSI, fallback to address if not available/null
+                    String recipient = request.getSM_RP_DA().getImsi();
+                    if (recipient == null && request.getSM_RP_DA().getServiceCentreAddressDA() != null) {
+                         recipient = request.getSM_RP_DA().getServiceCentreAddressDA().getAddress();
+                    }
+                    msg.setRecipient(recipient != null ? recipient : "UNKNOWN");
+                }
+                
+                if (request.getSM_RP_UI() != null) {
+                    msg.setContent(java.util.Base64.getEncoder().encodeToString(request.getSM_RP_UI().getData()));
+                }
+                
+                natsPublisher.publishMoSmsResponse(msg);
+                logger.info("LOOPBACK: Published MT-ForwardSM as MO SMS event (dialog: {})", dialogId);
+            }
+
         } catch (Exception e) {
             logger.error("Error processing MT-ForwardSM (dialog: {}, invoke: {})",
                     dialogId, invokeId, e);

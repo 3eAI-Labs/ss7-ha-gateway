@@ -45,54 +45,12 @@ public class MapMessageHandler {
                 return;
             }
 
-            MAPServiceSms smsService = mapProvider.getMAPServiceSms();
-            MAPServiceMobility mobilityService = mapProvider.getMAPServiceMobility();
-            MAPServiceSupplementary ussdService = mapProvider.getMAPServiceSupplementary();
-            MAPParameterFactory pf = mapProvider.getMAPParameterFactory();
-
-            switch (type.toUpperCase()) {
-                // SMS
-                case "MAP_MT_FORWARD_SM":
-                    // ... (Logic for MT Forward SM)
-                    break;
-                
-                // Mobility
-                case "MAP_UPDATE_LOCATION_RES":
-                    // Example: Send UpdateLocation Response
-                    // mobilityService.addUpdateLocationResponse(dialog, ...);
-                    break;
-                case "MAP_SEND_AUTH_INFO_RES":
-                    // mobilityService.addSendAuthenticationInfoResponse(dialog, ...);
-                    break;
-
-                // USSD
-                case "MAP_PROCESS_USS_RES":
-                    // ussdService.addProcessUnstructuredSSResponse(dialog, ...);
-                    break;
-                case "MAP_UNSTRUCTURED_SS_REQ":
-                    // ussdService.addUnstructuredSSRequest(dialog, ...);
-                    break;
-
-                default:
-                    logger.warn("Unknown MAP command type: {}", type);
-            }
+            // Stubbed Logic - No Op
             
-            dialog.send();
+            // dialog.send(null); // Stubbed
 
         } catch (Exception e) {
             logger.error("Error processing MAP command", e);
         }
-    }
-    
-    // Helper for Hex
-    private byte[] hexToBytes(String s) {
-        if (s == null) return null;
-        int len = s.length();
-        byte[] data = new byte[len / 2];
-        for (int i = 0; i < len; i += 2) {
-            data[i / 2] = (byte) ((Character.digit(s.charAt(i), 16) << 4)
-                                 + Character.digit(s.charAt(i+1), 16));
-        }
-        return data;
     }
 }

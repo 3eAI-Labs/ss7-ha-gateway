@@ -8,7 +8,7 @@
     
     <groupId>com.company.ss7ha</groupId>
     <artifactId>ss7-ha-gateway-parent</artifactId>
-    <version>1.3.0</version>
+    <version>0.2.0</version>
     <packaging>pom</packaging>
     
     <name>SS7 HA Gateway Parent</name>

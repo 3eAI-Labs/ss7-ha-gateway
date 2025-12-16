@@ -13,7 +13,7 @@ RUN apk add --no-cache lksctp-tools
 WORKDIR /app
 
 # Copy the built JAR from the build stage
-COPY --from=build /build/ss7-core/target/ss7-core-1.0.0-SNAPSHOT.jar /app/ss7-ha-gateway.jar
+COPY --from=build /build/ss7-core/target/ss7-core-0.2.0.jar /app/ss7-ha-gateway.jar
 
 # Create non-root user
 RUN addgroup -g 1000 ss7 && \
