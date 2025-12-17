@@ -11,10 +11,7 @@ redis.persist.dialogs=true
 #
 # Kafka Configuration
 #
-kafka.bootstrap.servers=localhost:9092,localhost:9093,localhost:9094
-kafka.client.id=ss7-ha-gateway-node-1
-kafka.topic.prefix=ss7.
-kafka.publish.enabled=true
+
 
 #
 # M3UA Configuration

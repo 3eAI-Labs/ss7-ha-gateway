@@ -5,8 +5,6 @@ version: '3.8'
 #
 # Complete stack deployment:
 # - Redis Cluster (6 nodes: 3 masters + 3 replicas)
-# - Kafka Cluster (3 brokers)
-# - Zookeeper (for Kafka coordination)
 # - SS7 HA Gateway (3 nodes)
 # - SMSC Gateway (2 nodes)
 # - Prometheus (monitoring)
@@ -111,85 +109,6 @@ services:
       - ss7-network
 
   #
-  # Zookeeper (for Kafka)
-  #
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.5.0
-    container_name: zookeeper
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    ports:
-      - "2181:2181"
-    volumes:
-      - zookeeper-data:/var/lib/zookeeper/data
-      - zookeeper-logs:/var/lib/zookeeper/log
-    networks:
-      - ss7-network
-
-  #
-  # Kafka Cluster (3 brokers)
-  #
-  kafka-1:
-    image: confluentinc/cp-kafka:7.5.0
-    container_name: kafka-1
-    depends_on:
-      - zookeeper
-    ports:
-      - "9092:9092"
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:9092
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
-      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
-      KAFKA_MIN_INSYNC_REPLICAS: 2
-    volumes:
-      - kafka-1-data:/var/lib/kafka/data
-    networks:
-      - ss7-network
-
-  kafka-2:
-    image: confluentinc/cp-kafka:7.5.0
-    container_name: kafka-2
-    depends_on:
-      - zookeeper
-    ports:
-      - "9093:9093"
-    environment:
-      KAFKA_BROKER_ID: 2
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-2:9093
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
-    volumes:
-      - kafka-2-data:/var/lib/kafka/data
-    networks:
-      - ss7-network
-
-  kafka-3:
-    image: confluentinc/cp-kafka:7.5.0
-    container_name: kafka-3
-    depends_on:
-      - zookeeper
-    ports:
-      - "9094:9094"
-    environment:
-      KAFKA_BROKER_ID: 3
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-3:9094
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
-    volumes:
-      - kafka-3-data:/var/lib/kafka/data
-    networks:
-      - ss7-network
-
-  #
   # SS7 HA Gateway (3 nodes)
   #
   ss7-ha-gateway-1:
@@ -199,14 +118,9 @@ services:
     container_name: ss7-ha-gateway-1
     depends_on:
       - redis-cluster-init
-      - kafka-1
-      - kafka-2
-      - kafka-3
     environment:
       NODE_ID: 1
       REDIS_CLUSTER_NODES: redis-node-1:7000,redis-node-2:7001,redis-node-3:7002,redis-node-4:7003,redis-node-5:7004,redis-node-6:7005
-      KAFKA_BOOTSTRAP_SERVERS: kafka-1:9092,kafka-2:9093,kafka-3:9094
-      KAFKA_CLIENT_ID: ss7-ha-gateway-node-1
       M3UA_LOCAL_PORT: 2905
     ports:
       - "2905:2905"  # M3UA SCTP
@@ -221,14 +135,9 @@ services:
     container_name: ss7-ha-gateway-2
     depends_on:
       - redis-cluster-init
-      - kafka-1
-      - kafka-2
-      - kafka-3
     environment:
       NODE_ID: 2
       REDIS_CLUSTER_NODES: redis-node-1:7000,redis-node-2:7001,redis-node-3:7002,redis-node-4:7003,redis-node-5:7004,redis-node-6:7005
-      KAFKA_BOOTSTRAP_SERVERS: kafka-1:9092,kafka-2:9093,kafka-3:9094
-      KAFKA_CLIENT_ID: ss7-ha-gateway-node-2
       M3UA_LOCAL_PORT: 2906
     ports:
       - "2906:2906"  # M3UA SCTP
@@ -243,14 +152,9 @@ services:
     container_name: ss7-ha-gateway-3
     depends_on:
       - redis-cluster-init
-      - kafka-1
-      - kafka-2
-      - kafka-3
     environment:
       NODE_ID: 3
       REDIS_CLUSTER_NODES: redis-node-1:7000,redis-node-2:7001,redis-node-3:7002,redis-node-4:7003,redis-node-5:7004,redis-node-6:7005
-      KAFKA_BOOTSTRAP_SERVERS: kafka-1:9092,kafka-2:9093,kafka-3:9094
-      KAFKA_CLIENT_ID: ss7-ha-gateway-node-3
       M3UA_LOCAL_PORT: 2907
     ports:
       - "2907:2907"  # M3UA SCTP
@@ -266,15 +170,8 @@ services:
       context: ../../smsc-gateway
       dockerfile: docker/Dockerfile
     container_name: smsc-gateway-1
-    depends_on:
-      - kafka-1
-      - kafka-2
-      - kafka-3
     environment:
       NODE_ID: 1
-      KAFKA_BOOTSTRAP_SERVERS: kafka-1:9092,kafka-2:9093,kafka-3:9094
-      KAFKA_CONSUMER_GROUP: smsc-gateway
-      KAFKA_TOPICS: ss7.sms.mo.incoming
     ports:
       - "8080:8080"  # HTTP API
       - "9100:9090"  # Prometheus metrics
@@ -286,15 +183,8 @@ services:
       context: ../../smsc-gateway
       dockerfile: docker/Dockerfile
     container_name: smsc-gateway-2
-    depends_on:
-      - kafka-1
-      - kafka-2
-      - kafka-3
     environment:
       NODE_ID: 2
-      KAFKA_BOOTSTRAP_SERVERS: kafka-1:9092,kafka-2:9093,kafka-3:9094
-      KAFKA_CONSUMER_GROUP: smsc-gateway
-      KAFKA_TOPICS: ss7.sms.mo.incoming
     ports:
       - "8081:8080"  # HTTP API
       - "9101:9090"  # Prometheus metrics
@@ -352,15 +242,6 @@ volumes:
   redis-node-4-data:
   redis-node-5-data:
   redis-node-6-data:
-
-  # Zookeeper volumes
-  zookeeper-data:
-  zookeeper-logs:
-
-  # Kafka volumes
-  kafka-1-data:
-  kafka-2-data:
-  kafka-3-data:
 
   # Monitoring volumes
   prometheus-data:

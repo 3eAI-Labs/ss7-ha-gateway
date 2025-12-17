@@ -65,12 +65,6 @@ spec:
               fieldPath: metadata.name
         - name: REDIS_CLUSTER_NODES
           value: "redis-cluster:6379"
-        - name: KAFKA_BOOTSTRAP_SERVERS
-          value: "kafka-cluster-kafka-bootstrap:9092"
-        - name: KAFKA_CLIENT_ID
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.name
         - name: JAVA_OPTS
           value: "-Xms1g -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
 
@@ -151,11 +145,6 @@ data:
     redis.cluster.nodes=redis-cluster:6379
     redis.dialog.ttl=3600
     redis.persist.dialogs=true
-
-    # Kafka Configuration
-    kafka.bootstrap.servers=kafka-cluster-kafka-bootstrap:9092
-    kafka.topic.prefix=ss7.
-    kafka.publish.enabled=true
 
     # M3UA Configuration
     m3ua.name=M3UA-STACK

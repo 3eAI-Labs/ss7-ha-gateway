@@ -5,7 +5,6 @@
 #
 # This script performs load testing on the SS7 HA Gateway:
 # - Redis latency measurement
-# - Kafka throughput measurement
 # - Dialog creation/deletion performance
 # - Failover time measurement
 #
@@ -14,7 +13,6 @@ set -e
 
 REDIS_HOST="${REDIS_HOST:-localhost}"
 REDIS_PORT="${REDIS_PORT:-7000}"
-KAFKA_BROKER="${KAFKA_BROKER:-localhost:9092}"
 NUM_DIALOGS="${NUM_DIALOGS:-1000}"
 DURATION="${DURATION:-60}"
 
@@ -24,7 +22,6 @@ echo "======================================"
 echo ""
 echo "Configuration:"
 echo "  Redis: $REDIS_HOST:$REDIS_PORT"
-echo "  Kafka: $KAFKA_BROKER"
 echo "  Number of dialogs: $NUM_DIALOGS"
 echo "  Duration: $DURATION seconds"
 echo ""
@@ -35,7 +32,7 @@ echo ""
 echo "[Test 1] Redis Latency Benchmark"
 echo "-----------------------------------"
 
-redis-cli -h $REDIS_HOST -p $REDIS_PORT --latency-history -i 1 &
+redis-cli -h $REDIS_HOST -p $REDIS_PORT --latency-history -i 1 & 
 REDIS_LATENCY_PID=$!
 
 sleep 10
@@ -125,40 +122,9 @@ echo "  Throughput: $THROUGHPUT dialogs/sec"
 echo ""
 
 #
-# Test 4: Kafka Throughput Test
-#
-echo "[Test 4] Kafka Throughput Test"
-echo "-------------------------------"
-
-# Check if kafka-producer-perf-test is available
-if command -v kafka-producer-perf-test &> /dev/null; then
-    kafka-producer-perf-test \
-        --topic ss7.sms.mo.incoming \
-        --num-records 10000 \
-        --record-size 1024 \
-        --throughput -1 \
-        --producer-props bootstrap.servers=$KAFKA_BROKER \
-        acks=all \
-        compression.type=snappy
-
-    echo ""
-
-    kafka-consumer-perf-test \
-        --topic ss7.sms.mo.incoming \
-        --bootstrap-server $KAFKA_BROKER \
-        --messages 10000 \
-        --timeout 60000
-
-else
-    echo "  Kafka performance tools not available, skipping..."
-fi
-
-echo ""
-
-#
 # Test 5: Concurrent Operations Test
 #
-echo "[Test 5] Concurrent Operations Test"
+echo "[Test 4] Concurrent Operations Test"
 echo "------------------------------------"
 
 CONCURRENCY=50
@@ -186,7 +152,7 @@ echo ""
 #
 # Test 6: Memory Usage
 #
-echo "[Test 6] Memory Usage"
+echo "[Test 5] Memory Usage"
 echo "---------------------"
 
 MEMORY_INFO=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT INFO memory | grep used_memory_human)
@@ -200,14 +166,4 @@ echo ""
 #
 # Summary
 #
-echo "======================================"
-echo "Performance Test Complete"
-echo "======================================"
-echo ""
-echo "Key Metrics:"
-echo "  - Redis latency: < 2ms (target)"
-echo "  - Dialog store throughput: > 1000 dialogs/sec (target)"
-echo "  - Kafka throughput: > 10000 msgs/sec (target)"
-echo "  - Concurrent operations: $CONCURRENCY clients"
-echo ""
-echo "For detailed results, review the output above."
+echo "======================================

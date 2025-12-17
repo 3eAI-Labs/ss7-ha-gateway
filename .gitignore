@@ -108,8 +108,7 @@ build/
 dump.rdb
 appendonly.aof
 
-# Kafka data
-kafka-logs/
+
 
 # Credentials and secrets (BE VERY CAREFUL!)
 *credentials*

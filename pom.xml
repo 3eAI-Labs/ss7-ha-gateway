@@ -12,7 +12,7 @@
     <packaging>pom</packaging>
     
     <name>SS7 HA Gateway Parent</name>
-    <description>High Availability SS7 Gateway with Kafka integration for MAP/CAP operations</description>
+    <description>High Availability SS7 Gateway with NATS integration for MAP/CAP operations</description>
     
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
