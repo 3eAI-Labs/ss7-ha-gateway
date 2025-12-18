@@ -125,6 +125,60 @@ public class SS7Stack {
             // Start MAP if enabled (MAP starts TCAP internally)
             if (mapStack != null) {
                 mapStack.start();
+                
+                // Explicitly activate MAP services using Reflection
+                // This is required because the 'activate()' method might not be exposed in the public interface
+                // depending on the JSS7 version, but the implementation requires it.
+                MAPProvider provider = mapStack.getProvider();
+                if (provider != null) {
+                    try {
+                        // Activate SMS Service
+                        Object smsService = provider.getMAPServiceSms();
+                        if (smsService != null) {
+                            try {
+                                java.lang.reflect.Method method = smsService.getClass().getMethod("activate");
+                                method.invoke(smsService);
+                                logger.info("MAP Service SMS activated (via Reflection)");
+                            } catch (NoSuchMethodException e) {
+                                logger.warn("activate() method not found on SMS service class, trying 'acivate' typo workaround...");
+                                try {
+                                    java.lang.reflect.Method method = smsService.getClass().getMethod("acivate");
+                                    method.invoke(smsService);
+                                    logger.info("MAP Service SMS activated (via 'acivate' typo workaround)");
+                                } catch (NoSuchMethodException ex) {
+                                    logger.error("Neither activate() nor acivate() found on SMS service");
+                                }
+                            }
+                        }
+                        
+                        // Activate Mobility Service
+                        Object mobService = provider.getMAPServiceMobility();
+                        if (mobService != null) {
+                            try {
+                                java.lang.reflect.Method method = mobService.getClass().getMethod("activate");
+                                method.invoke(mobService);
+                                logger.info("MAP Service Mobility activated (via Reflection)");
+                            } catch (NoSuchMethodException e) {
+                                logger.debug("activate() method not found on Mobility service");
+                            }
+                        }
+
+                        // Activate Supplementary Service
+                        Object supService = provider.getMAPServiceSupplementary();
+                        if (supService != null) {
+                            try {
+                                java.lang.reflect.Method method = supService.getClass().getMethod("activate");
+                                method.invoke(supService);
+                                logger.info("MAP Service Supplementary activated (via Reflection)");
+                            } catch (NoSuchMethodException e) {
+                                logger.debug("activate() method not found on Supplementary service");
+                            }
+                        }
+                    } catch (Exception e) {
+                        logger.warn("Failed to activate MAP services via reflection", e);
+                    }
+                }
+                
                 logger.info("MAP started (TCAP started internally)");
             }
 

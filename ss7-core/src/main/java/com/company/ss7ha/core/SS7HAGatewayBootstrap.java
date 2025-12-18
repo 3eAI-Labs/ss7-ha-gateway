@@ -62,7 +62,7 @@ public class SS7HAGatewayBootstrap {
             SS7StackManager.getInstance().start();
 
             // Initialize NATS and Listeners
-            initializeNats();
+            initializeNats(ss7Config);
             registerMapListeners();
             registerCapListeners();
             
@@ -124,9 +124,29 @@ public class SS7HAGatewayBootstrap {
             
             smsServiceListener = new MapSmsServiceListener(dialogStore, eventPublisher, natsPublisher, persistDialogs, publishEvents);
             
+            // Generic listener for other services (Mobility, USSD/Supplementary)
+            com.company.ss7ha.core.listeners.GenericMapServiceListener genericListener = 
+                new com.company.ss7ha.core.listeners.GenericMapServiceListener(eventPublisher, natsPublisher, publishEvents);
+
             MAPProvider mapProvider = SS7StackManager.getInstance().getMapProvider();
             if (mapProvider != null) {
-                mapProvider.getMAPServiceSms().addMAPServiceListener(smsServiceListener);
+                // SMS Listener
+                if (mapProvider.getMAPServiceSms() != null) {
+                    mapProvider.getMAPServiceSms().addMAPServiceListener(smsServiceListener);
+                }
+
+                // Mobility Listener
+                if (mapProvider.getMAPServiceMobility() != null) {
+                    mapProvider.getMAPServiceMobility().addMAPServiceListener(genericListener);
+                    logger.info("Generic MAP listener registered for Mobility");
+                }
+                
+                // Supplementary/USSD Listener
+                if (mapProvider.getMAPServiceSupplementary() != null) {
+                    mapProvider.getMAPServiceSupplementary().addMAPServiceListener(genericListener);
+                    logger.info("Generic MAP listener registered for Supplementary/USSD");
+                }
+                
                 logger.info("MAP service listeners registered (Persistence: {}, Events: {})", persistDialogs, publishEvents);
             } else {
                 logger.error("MAP Provider is null, cannot register listeners");
@@ -157,7 +177,7 @@ public class SS7HAGatewayBootstrap {
         }
     }
 
-    private void initializeNats() {
+private void initializeNats(SS7Configuration ss7Config) {
         logger.info("Initializing NATS...");
         try {
             String natsUrl = System.getProperty("nats.server.url",
@@ -182,6 +202,10 @@ public class SS7HAGatewayBootstrap {
             // Wire publisher to Stack Manager for operational events
             SS7StackManager.getInstance().setPublisher(natsPublisher);
             
+            // Initialize Event Publisher Adapter
+            this.eventPublisher = new com.company.ss7ha.core.events.NatsEventPublisherAdapter(natsPublisher);
+            logger.info("Event Publisher initialized (NATS Adapter)");
+            
             logger.info("NATS Publisher initialized");
 
             // Initialize NATS subscriber (Uses NatsConnectionManager internally)
@@ -191,7 +215,7 @@ public class SS7HAGatewayBootstrap {
             // Using SS7StackManager to get MAPStack
             MAPStack mapStack = SS7StackManager.getInstance().getStack().getMapStack();
             
-            MtSmsMessageHandler mtSmsHandler = new MtSmsMessageHandler(mapStack, eventPublisher);
+            MtSmsMessageHandler mtSmsHandler = new MtSmsMessageHandler(mapStack, eventPublisher, ss7Config);
             natsSubscriber.setMtSmsHandler(mtSmsHandler);
 
             SriMessageHandler sriHandler = new SriMessageHandler(mapStack, eventPublisher);

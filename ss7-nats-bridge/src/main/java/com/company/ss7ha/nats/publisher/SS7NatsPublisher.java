@@ -210,6 +210,27 @@ public class SS7NatsPublisher {
     }
 
     /**
+     * Publish raw string payload to a specific subject
+     */
+    public void publishRaw(String subject, String payload) {
+        Connection natsConnection = NatsConnectionManager.getInstance().getConnection();
+        if (natsConnection == null || natsConnection.getStatus() != Connection.Status.CONNECTED) {
+            logger.error("Cannot publish raw message to {}, NATS not connected", subject);
+            throw new IllegalStateException("NATS connection not available");
+        }
+
+        try {
+            byte[] data = payload.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            natsConnection.publish(subject, data);
+            
+            logger.debug("Published raw message to subject: {} (length: {})", subject, data.length);
+        } catch (Exception e) {
+            logger.error("Failed to publish raw message to subject: " + subject, e);
+            throw new RuntimeException("NATS raw publish failed", e);
+        }
+    }
+
+    /**
      * Check if publisher is connected
      */
     public boolean isConnected() {

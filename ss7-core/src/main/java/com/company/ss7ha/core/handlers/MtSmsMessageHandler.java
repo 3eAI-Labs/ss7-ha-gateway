@@ -35,6 +35,13 @@ import org.restcomm.protocols.ss7.map.api.MAPApplicationContextName;
 import org.restcomm.protocols.ss7.map.api.MAPApplicationContextVersion;
 import org.restcomm.protocols.ss7.sccp.parameter.SccpAddress;
 
+import com.company.ss7ha.core.config.SS7Configuration;
+import org.restcomm.protocols.ss7.indicator.NatureOfAddress;
+import org.restcomm.protocols.ss7.indicator.RoutingIndicator;
+// Removed: import org.restcomm.protocols.ss7.indicator.NumberingPlan;
+import org.restcomm.protocols.ss7.sccp.parameter.SccpAddress;
+import org.restcomm.protocols.ss7.sccp.impl.parameter.SccpAddressImpl;
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.Base64;
@@ -47,11 +54,13 @@ public class MtSmsMessageHandler implements SS7NatsSubscriber.MessageHandler<Map
 
     private final MAPStack mapStack;
     private final EventPublisher eventPublisher;
+    private final SS7Configuration ss7Config;
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
 
-    public MtSmsMessageHandler(MAPStack mapStack, EventPublisher eventPublisher) {
+    public MtSmsMessageHandler(MAPStack mapStack, EventPublisher eventPublisher, SS7Configuration ss7Config) {
         this.mapStack = mapStack;
         this.eventPublisher = eventPublisher;
+        this.ss7Config = ss7Config;
     }
 
     @Override
@@ -83,18 +92,24 @@ public class MtSmsMessageHandler implements SS7NatsSubscriber.MessageHandler<Map
             // 3. Create MAPDialog
             // Use appropriate application context
             MAPApplicationContext appCtx = MAPApplicationContext.getInstance(
-                MAPApplicationContextName.shortMsgGatewayContext,
+                MAPApplicationContextName.shortMsgMTRelayContext,
                 MAPApplicationContextVersion.version3);
 
-            // Dummy SCCP addresses for now.
-            SccpAddress origAddress = null; 
-            SccpAddress destAddress = null; 
+            // Construct Originating Address (Local SMSC) using PC + SSN (Bypassing GT issues for now)
+            SccpAddress origAddress = new SccpAddressImpl(RoutingIndicator.ROUTING_BASED_ON_DPC_AND_SSN, 
+                    null, ss7Config.getSccpLocalSpc(), ss7Config.getSccpLocalSsn()); 
+
+            // Construct Destination Address (Remote MSC/HLR) using PC + SSN
+            SccpAddress destAddress = new SccpAddressImpl(RoutingIndicator.ROUTING_BASED_ON_DPC_AND_SSN, 
+                    null, ss7Config.getSccpRemoteSpc(), 8); // MSC SSN = 8
+
             AddressString origReference = null; 
             AddressString destReference = null; 
             int networkId = 1;
 
             MAPDialogSms mapDialog = mapProvider.getMAPServiceSms().createNewDialog(
                 appCtx, origAddress, origReference, destAddress, destReference, networkId);
+            
             
             // 4. Construct SM_RP_DA (Destination Address)
             ISDNAddressString daMsisdn = mapParamFactory.createISDNAddressString(

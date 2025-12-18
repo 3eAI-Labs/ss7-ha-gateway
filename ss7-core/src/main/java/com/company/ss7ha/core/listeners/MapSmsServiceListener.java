@@ -4,6 +4,7 @@ import com.company.ss7ha.core.events.EventPublisher;
 import com.company.ss7ha.core.handlers.CorrelationIdWrapper; // Added
 import com.company.ss7ha.core.model.DialogState;
 import com.company.ss7ha.core.store.DialogStore;
+import com.company.ss7ha.messages.MapSmsMessage;
 import com.company.ss7ha.messages.MapSriMessage;
 import com.company.ss7ha.messages.SS7Message;
 import com.company.ss7ha.nats.publisher.SS7NatsPublisher;
@@ -120,6 +121,10 @@ public class MapSmsServiceListener implements MAPServiceSmsListener {
             if (persistDialogs && dialogStore != null) {
                 persistDialogState(dialog, "MT_FORWARD_SM", invokeId);
             }
+
+            // Loopback logic removed as per instruction.
+            // The gateway will act as a standard SS7 node.
+
         } catch (Exception e) {
             logger.error("Error processing MT-ForwardSM (dialog: {}, invoke: {})",
                     dialogId, invokeId, e);

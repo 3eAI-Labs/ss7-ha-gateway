@@ -36,8 +36,8 @@ public class SS7NatsSubscriber {
     private ExecutorService messageProcessorPool;
 
     // NATS subjects for subscribing to requests from SMSC
-    private static final String SUBJECT_MT_SMS_REQ = "map.mt.sms.request";
-    private static final String SUBJECT_SRI_REQ = "map.sri.request";
+    private static final String SUBJECT_MT_SMS_REQ = "ss7.mt.sms.request";
+    private static final String SUBJECT_SRI_REQ = "ss7.sri.request";
     private static final String SUBJECT_CAP_CMD_REQ = "cap.command.>";
 
     // Message handlers (to be injected)
@@ -60,6 +60,7 @@ public class SS7NatsSubscriber {
      * Initialize NATS connection and subscribe to subjects
      */
     public void start() throws IOException, InterruptedException {
+        System.out.println("DEBUG: SS7NatsSubscriber.start() called");
         logger.info("Starting SS7 NATS subscriber, utilizing manager for: " + natsUrl);
 
         // Ensure connection is established via Manager
@@ -81,6 +82,7 @@ public class SS7NatsSubscriber {
      * Subscribe to all MAP request subjects using queue groups for load balancing
      */
     private void subscribeToSubjects() {
+        System.out.println("DEBUG: Subscribing to subjects: " + SUBJECT_MT_SMS_REQ + ", " + SUBJECT_SRI_REQ);
         // Subscribe to MT SMS requests (mobile-terminated SMS to be sent to network)
         dispatcher.subscribe(SUBJECT_MT_SMS_REQ, queueGroup, this::handleMtSmsRequest);
         logger.info("Subscribed to " + SUBJECT_MT_SMS_REQ + " with queue group: " + queueGroup);
